@@ -1,0 +1,4 @@
+This is a project to handle switching firmware on a Raspberry Pi Pico remotely (e.g. over SSH).
+Typical use of a Pico involves holding down BOOTSEL when starting, then flashing the board with a UF2 file.  Typical UF2 files would a MicroPython environment (which can run .py files or simply interact via the REPL), a compiled C/C++ program, and a small filesystem.
+
+However, if you are working remotely, then holding down BOOTSEL is then not possible.  This project aims to allow for simple switching between firmwares for Pico.  It is currently an early stage project - more details will be added as functionality grows.
