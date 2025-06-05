@@ -6,4 +6,5 @@
 PICO_DEV=$1
 
 # Using mpremote (recommended for newer MicroPython versions)
+# ignore any output
 mpremote connect $PICO_DEV exec "import bootloader_trigger" > /dev/null 2>&1
