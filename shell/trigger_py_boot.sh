@@ -5,8 +5,5 @@
 # Set the Pico's serial device (update as needed)
 PICO_DEV=$1
 
-# Use ampy or mpremote to run the script on the Pico
-# Uncomment one of the following blocks depending on your tool
-
 # Using mpremote (recommended for newer MicroPython versions)
-mpremote connect $PICO_DEV run "import bootloader_trigger"
+mpremote connect $PICO_DEV exec "import bootloader_trigger" > /dev/null 2>&1
