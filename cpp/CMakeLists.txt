@@ -24,4 +24,4 @@ target_link_libraries(hello_world pico_stdlib)
 target_link_libraries(bootloader_trigger pico_stdlib)
 
 # create map/bin/hex/uf2 file in addition to ELF.
-pico_add_extra_outputs(hello_world)
+pico_add_extra_outputs(bootloader_trigger)
