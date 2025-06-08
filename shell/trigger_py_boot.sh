@@ -9,6 +9,7 @@ SHOW_OUTPUT=$2       # Second argument: Whether to show output ("true" to show)
 # Check if the Pico device argument is provided
 if [ -z "$PICO_DEV" ]; then
     echo "Usage: $0 <PICO_DEV> [show_output]"
+    echo "Usually this is resolved by adding /dev/ttyACM0 (or similar)"
     exit 1
 fi
 
