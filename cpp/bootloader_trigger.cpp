@@ -7,8 +7,8 @@
 #include "pico/bootrom.h"     // For reset_usb_boot
 
 // The keys the user must press in sequence to trigger UF2 mode
-const char TRIGGER_KEY1 = 'u';
-const char TRIGGER_KEY2 = 'f';
+const char TRIGGER_KEY1 = 'r'; // reboot
+const char TRIGGER_KEY2 = 'u'; // uf2 mode
 
 int main() {
     stdio_init_all(); // Initialize all standard I/O (USB serial)
