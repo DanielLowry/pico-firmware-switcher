@@ -8,4 +8,4 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-"$SCRIPT_DIR/load_uf2.sh" Pico-MicroPython-20250415-v1.25.0.uf2
+"$SCRIPT_DIR/load_uf2.sh" bootloader_trigger.uf2
