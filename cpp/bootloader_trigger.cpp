@@ -12,7 +12,9 @@ const char TRIGGER_KEY2 = 'u'; // uf2 mode
 
 int main() {
     stdio_init_all(); // Initialize all standard I/O (USB serial)
+    sleep_ms(100);    // Let USB settle
 
+    printf("FW:CPP\n"); // Banner so the host can identify firmware
     printf("Press '%c' then '%c' to reboot into UF2 bootloader mode.\n", TRIGGER_KEY1, TRIGGER_KEY2);
 
     while (true) {
