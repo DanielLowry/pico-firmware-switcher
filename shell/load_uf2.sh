@@ -21,13 +21,25 @@ if [[ ! -f "$UF2_FILE" ]]; then
     exit 1
 fi
 
-PICO_MOUNT_POINT=$(lsblk -o LABEL,MOUNTPOINT | grep 'RPI-RP2' | awk '{print $2}')
+PICO_DEVICE_LINE=$(lsblk -o LABEL,NAME,MOUNTPOINT -nr | awk '$1=="RPI-RP2"{print $0; exit}')
+PICO_DEVICE_NAME=$(echo "$PICO_DEVICE_LINE" | awk '{print $2}')
+PICO_MOUNT_POINT=$(echo "$PICO_DEVICE_LINE" | awk '{print $3}')
 
 echo "Pico mount point: $PICO_MOUNT_POINT"
 
-if [[ -z "$PICO_MOUNT_POINT" ]]; then
+if [[ -z "$PICO_DEVICE_NAME" ]]; then
     echo "Error: Pico mass storage device (RPI-RP2) not found."
     exit 1
+fi
+
+if [[ -z "$PICO_MOUNT_POINT" ]]; then
+    PICO_MOUNT_POINT="${PICO_MOUNT_BASE:-/mnt/pico}"
+    echo "Pico not mounted; mounting /dev/$PICO_DEVICE_NAME at $PICO_MOUNT_POINT..."
+    mkdir -p "$PICO_MOUNT_POINT"
+    if ! mount "/dev/$PICO_DEVICE_NAME" "$PICO_MOUNT_POINT"; then
+        echo "Error: failed to mount /dev/$PICO_DEVICE_NAME. Try running with sudo."
+        exit 1
+    fi
 fi
 
 echo "Copying $UF2_FILE to $PICO_MOUNT_POINT..."
