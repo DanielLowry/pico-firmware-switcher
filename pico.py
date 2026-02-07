@@ -48,7 +48,8 @@ def parse_lsblk_line(line: str) -> dict[str, str]:
 
 
 def find_rpi_rp2() -> Optional[Rp2Device]:
-    cmd = ["lsblk", "-P", "-nr", "-o", "NAME,LABEL,MOUNTPOINT"]
+    # Some lsblk versions treat --pairs (-P) as mutually exclusive with --raw (-r).
+    cmd = ["lsblk", "-P", "-n", "-o", "NAME,LABEL,MOUNTPOINT"]
     result = subprocess.run(cmd, check=False, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "lsblk failed")
