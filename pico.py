@@ -103,7 +103,11 @@ def copy_uf2(uf2_path: Path, mountpoint: Path, verbose: bool) -> None:
     os.sync()
 
 
-def run_mpremote(args: list[str], quiet: bool = False) -> None:
+def run_mpremote(
+    args: list[str],
+    quiet: bool = False,
+    allow_error: bool = False,
+) -> subprocess.CompletedProcess[str]:
     cmd = ["mpremote", *args]
     result = subprocess.run(
         cmd,
@@ -111,11 +115,12 @@ def run_mpremote(args: list[str], quiet: bool = False) -> None:
         capture_output=quiet,
         text=True,
     )
-    if result.returncode != 0:
+    if result.returncode != 0 and not allow_error:
         err = ""
         if quiet:
             err = (result.stderr or result.stdout).strip()
         raise RuntimeError(f"mpremote failed: {' '.join(cmd)}{(': ' + err) if err else ''}")
+    return result
 
 
 def wait_for_serial_port(port: str, timeout: float, verbose: bool) -> None:
@@ -189,10 +194,20 @@ def probe_micropython(port: str, verbose: bool) -> bool:
     return False
 
 
-def trigger_from_py(port: str, verbose: bool) -> None:
+def trigger_from_py(port: str, verbose: bool) -> Optional[str]:
     if verbose:
         print("Triggering BOOTSEL from MicroPython...")
-    run_mpremote(["connect", port, "exec", "import bootloader_trigger"], quiet=not verbose)
+    result = run_mpremote(
+        ["connect", port, "exec", "import bootloader_trigger"],
+        quiet=not verbose,
+        allow_error=True,
+    )
+    if result.returncode == 0:
+        return None
+    err = (result.stderr or result.stdout).strip()
+    if verbose and err:
+        print(f"mpremote trigger warning: {err}")
+    return err or "mpremote failed to run bootloader_trigger"
 
 
 def trigger_from_cpp(port: str, verbose: bool) -> None:
@@ -233,8 +248,9 @@ def switch_firmware(
     if selected_mode == "auto":
         selected_mode = detect_mode(port=port, timeout=detect_timeout, verbose=verbose) or "unknown"
 
+    trigger_error: Optional[str] = None
     if selected_mode == "py":
-        trigger_from_py(port=port, verbose=verbose)
+        trigger_error = trigger_from_py(port=port, verbose=verbose)
     elif selected_mode == "cpp":
         trigger_from_cpp(port=port, verbose=verbose)
     elif selected_mode == "bootsel":
@@ -245,7 +261,16 @@ def switch_firmware(
             "Could not detect current mode. Use --mode py|cpp|bootsel to override."
         )
 
-    mountpoint = wait_for_bootsel_mount(timeout=bootsel_timeout, mount_base=mount_base, verbose=verbose)
+    try:
+        mountpoint = wait_for_bootsel_mount(
+            timeout=bootsel_timeout,
+            mount_base=mount_base,
+            verbose=verbose,
+        )
+    except RuntimeError as exc:
+        if trigger_error:
+            raise RuntimeError(f"MicroPython trigger failed: {trigger_error}") from exc
+        raise
     copy_uf2(uf2_path=uf2_path, mountpoint=mountpoint, verbose=verbose)
 
     if target == "py" and install_helpers:
