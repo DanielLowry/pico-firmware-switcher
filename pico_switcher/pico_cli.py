@@ -6,12 +6,12 @@ import argparse
 import sys
 from pathlib import Path
 
-from pico_mpremote import install_micropython_helpers
-from pico_device import copy_uf2, wait_for_bootsel_mount
-from pico_switch import detect_mode, detect_mode_safe, switch_firmware
+from .pico_device import copy_uf2, wait_for_bootsel_mount
+from .pico_mpremote import install_micropython_helpers
+from .pico_switch import detect_mode, detect_mode_safe, switch_firmware
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PORT = "/dev/ttyACM0"
 DEFAULT_MOUNT = "/mnt/pico"
 DEFAULT_PY_UF2 = ROOT / "uf2s" / "Pico-MicroPython-20250415-v1.25.0.uf2"

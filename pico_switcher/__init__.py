@@ -1,0 +1,2 @@
+"""Pico firmware switcher package."""
+

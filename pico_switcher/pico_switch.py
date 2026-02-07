@@ -5,8 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Optional
 
-from pico_mpremote import install_micropython_helpers, probe_micropython, trigger_from_py
-from pico_device import (
+from .pico_device import (
     copy_uf2,
     find_rpi_rp2,
     read_banner,
@@ -14,6 +13,7 @@ from pico_device import (
     wait_for_bootsel_mount,
     wait_for_serial_port,
 )
+from .pico_mpremote import install_micropython_helpers, probe_micropython, trigger_from_py
 
 
 def detect_mode(port: str, timeout: float, verbose: bool) -> Optional[str]:
