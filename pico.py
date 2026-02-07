@@ -242,11 +242,20 @@ def switch_firmware(
     bootsel_timeout: float,
     install_helpers: bool,
     serial_wait: float,
+    force_flash: bool,
     verbose: bool,
-) -> None:
+) -> bool:
     selected_mode = mode
     if selected_mode == "auto":
         selected_mode = detect_mode(port=port, timeout=detect_timeout, verbose=verbose) or "unknown"
+
+    if selected_mode == target and not force_flash:
+        if verbose:
+            print(f"Already in {target} mode, skipping UF2 flash.")
+        if target == "py" and install_helpers:
+            wait_for_serial_port(port=port, timeout=serial_wait, verbose=verbose)
+            install_micropython_helpers(port=port, helper_files=DEFAULT_HELPER_FILES, verbose=verbose)
+        return False
 
     trigger_error: Optional[str] = None
     if selected_mode == "py":
@@ -276,6 +285,7 @@ def switch_firmware(
     if target == "py" and install_helpers:
         wait_for_serial_port(port=port, timeout=serial_wait, verbose=verbose)
         install_micropython_helpers(port=port, helper_files=DEFAULT_HELPER_FILES, verbose=verbose)
+    return True
 
 
 def detect_mode_safe(port: str, timeout: float, verbose: bool) -> Optional[str]:
@@ -317,6 +327,11 @@ def add_common_switch_args(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=12.0,
         help="Seconds to wait for serial port after flashing",
+    )
+    parser.add_argument(
+        "--force-flash",
+        action="store_true",
+        help="Flash even when detect reports device already in target mode",
     )
     parser.add_argument("--verbose", action="store_true", help="Show detailed logs")
 
@@ -383,7 +398,7 @@ def main() -> int:
             return 0
 
         if args.command == "to-py":
-            switch_firmware(
+            flashed = switch_firmware(
                 target="py",
                 port=args.port,
                 mode=args.mode,
@@ -393,16 +408,20 @@ def main() -> int:
                 bootsel_timeout=args.bootsel_timeout,
                 install_helpers=args.install_helpers,
                 serial_wait=args.serial_wait,
+                force_flash=args.force_flash,
                 verbose=args.verbose,
             )
-            print("Switched to MicroPython UF2.")
+            if flashed:
+                print("Switched to MicroPython UF2.")
+            else:
+                print("Already in MicroPython mode; skipped UF2 flash.")
             detect_timeout = max(args.detect_timeout, 2.0)
             mode = detect_mode_safe(port=args.port, timeout=detect_timeout, verbose=args.verbose)
             print(f"detect: {mode or 'unknown'}")
             return 0
 
         if args.command == "to-cpp":
-            switch_firmware(
+            flashed = switch_firmware(
                 target="cpp",
                 port=args.port,
                 mode=args.mode,
@@ -412,9 +431,13 @@ def main() -> int:
                 bootsel_timeout=args.bootsel_timeout,
                 install_helpers=False,
                 serial_wait=args.serial_wait,
+                force_flash=args.force_flash,
                 verbose=args.verbose,
             )
-            print("Switched to C++ UF2.")
+            if flashed:
+                print("Switched to C++ UF2.")
+            else:
+                print("Already in C++ mode; skipped UF2 flash.")
             return 0
 
         if args.command == "install-py-files":

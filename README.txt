@@ -60,10 +60,12 @@ Usage (single CLI, recommended)
 1) Switch to MicroPython
    - `python pico.py to-py --port /dev/ttyACM0 --verbose`
    - This detects mode, triggers BOOTSEL, mounts `RPI-RP2` if needed, flashes the MicroPython UF2, then installs `py/boot.py` + `py/bootloader_trigger.py`.
+   - If already in MicroPython mode, UF2 flashing is skipped by default (use `--force-flash` to override).
 
 2) Switch to C++
    - `python pico.py to-cpp --port /dev/ttyACM0 --verbose`
    - This detects mode, triggers BOOTSEL, mounts `RPI-RP2` if needed, and flashes the C++ UF2.
+   - If already in C++ mode, UF2 flashing is skipped by default (use `--force-flash` to override).
 
 3) Flash any UF2 while already in BOOTSEL
    - `python pico.py flash /path/to/file.uf2 --verbose`
