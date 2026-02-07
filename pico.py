@@ -278,6 +278,15 @@ def switch_firmware(
         install_micropython_helpers(port=port, helper_files=DEFAULT_HELPER_FILES, verbose=verbose)
 
 
+def detect_mode_safe(port: str, timeout: float, verbose: bool) -> Optional[str]:
+    try:
+        return detect_mode(port=port, timeout=timeout, verbose=verbose)
+    except Exception as exc:
+        if verbose:
+            print(f"Post-switch detect failed: {exc}")
+        return None
+
+
 def add_common_switch_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--port", default=DEFAULT_PORT, help=f"Serial port (default: {DEFAULT_PORT})")
     parser.add_argument(
@@ -386,6 +395,10 @@ def main() -> int:
                 serial_wait=args.serial_wait,
                 verbose=args.verbose,
             )
+            print("Switched to MicroPython UF2.")
+            detect_timeout = max(args.detect_timeout, 2.0)
+            mode = detect_mode_safe(port=args.port, timeout=detect_timeout, verbose=args.verbose)
+            print(f"detect: {mode or 'unknown'}")
             return 0
 
         if args.command == "to-cpp":
@@ -401,6 +414,7 @@ def main() -> int:
                 serial_wait=args.serial_wait,
                 verbose=args.verbose,
             )
+            print("Switched to C++ UF2.")
             return 0
 
         if args.command == "install-py-files":
