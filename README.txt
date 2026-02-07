@@ -3,11 +3,11 @@ This project aims to make it possible to switch Raspberry Pi Pico firmware remot
 Current state (early prototype)
 - MicroPython side: `bootloader_trigger.py` (calls `machine.bootloader()`) and `boot.py` (prints `FW:PY` on boot; copy this onto the board).
 - C++ side: `bootloader_trigger` firmware prints `FW:CPP` at startup, then waits for the key sequence `r` then `u` and calls `reset_usb_boot(...)` to enter UF2 mode.
-- Python CLI is now available as `pico_switcher.py` (`detect`, `to-py`, `to-cpp`, `flash`, `install-py-files`).
+- Python CLI is now available as `pico.py` (`detect`, `to-py`, `to-cpp`, `flash`, `install-py-files`).
 - Existing shell scripts still work, but they are now legacy helpers.
 
 Plan (target workflow)
-- Add a small Python CLI (`pico_switcher.py`) with `to-py` and `to-cpp` commands.
+- Add a small Python CLI (`pico.py`) with `to-py` and `to-cpp` commands.
 - Detect current firmware by reading the boot banner (`FW:PY` / `FW:CPP`) over serial.
 - Trigger UF2 mode remotely:
   - MicroPython: run `bootloader_trigger.py` via `mpremote`.
@@ -43,7 +43,7 @@ Identify the current firmware
 - Make sure `py/boot.py` is on the MicroPython filesystem so it prints `FW:PY` on boot.
 - The C++ bootloader trigger prints `FW:CPP` on boot after you flash the rebuilt UF2.
 - Host helper: `./detect_firmware.py /dev/ttyACM0` (default port) reads the banner and reports the mode; requires `pyserial`.
-- CLI: `python pico_switcher.py detect --port /dev/ttyACM0`
+- CLI: `python pico.py detect --port /dev/ttyACM0` (uses boot banner, then falls back to an `mpremote` probe for MicroPython)
 
 Build the C++ UF2
 - Requirements: Pico SDK set up (`PICO_SDK_PATH` exported), CMake + Make/Ninja.
@@ -58,18 +58,18 @@ Build the C++ UF2
 
 Usage (single CLI, recommended)
 1) Switch to MicroPython
-   - `python pico_switcher.py to-py --port /dev/ttyACM0 --verbose`
+   - `python pico.py to-py --port /dev/ttyACM0 --verbose`
    - This detects mode, triggers BOOTSEL, mounts `RPI-RP2` if needed, flashes the MicroPython UF2, then installs `py/boot.py` + `py/bootloader_trigger.py`.
 
 2) Switch to C++
-   - `python pico_switcher.py to-cpp --port /dev/ttyACM0 --verbose`
+   - `python pico.py to-cpp --port /dev/ttyACM0 --verbose`
    - This detects mode, triggers BOOTSEL, mounts `RPI-RP2` if needed, and flashes the C++ UF2.
 
 3) Flash any UF2 while already in BOOTSEL
-   - `python pico_switcher.py flash /path/to/file.uf2 --verbose`
+   - `python pico.py flash /path/to/file.uf2 --verbose`
 
 4) Only install MicroPython helper files
-   - `python pico_switcher.py install-py-files --port /dev/ttyACM0`
+   - `python pico.py install-py-files --port /dev/ttyACM0`
 
 5) If autodetect misses your mode
    - Override explicitly: `--mode py`, `--mode cpp`, or `--mode bootsel`.

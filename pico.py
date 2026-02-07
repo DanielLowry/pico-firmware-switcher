@@ -166,7 +166,27 @@ def detect_mode(port: str, timeout: float, verbose: bool) -> Optional[str]:
             print(f"No known banner found; last line seen: {banner}")
         else:
             print("No serial banner read within timeout")
-    return mode
+    if mode:
+        return mode
+
+    if probe_micropython(port=port, verbose=verbose):
+        return "py"
+
+    return None
+
+
+def probe_micropython(port: str, verbose: bool) -> bool:
+    cmd = ["mpremote", "connect", port, "exec", "print('FW:PY')"]
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    if result.returncode == 0:
+        if verbose:
+            print("Detected MicroPython via mpremote probe")
+        return True
+    if verbose:
+        err = (result.stderr or result.stdout).strip()
+        if err:
+            print(f"mpremote probe failed: {err}")
+    return False
 
 
 def trigger_from_py(port: str, verbose: bool) -> None:
