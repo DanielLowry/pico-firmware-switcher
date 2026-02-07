@@ -26,7 +26,14 @@ class Rp2Device:
 
 
 def parse_lsblk_line(line: str) -> dict[str, str]:
-    """Parse one `lsblk -P` output line into a key/value mapping."""
+    """Parse one `lsblk -P` output line into a key/value mapping.
+
+    Args:
+        line: Raw output line containing shell-quoted `KEY="VALUE"` tokens.
+
+    Returns:
+        Dictionary of parsed key/value pairs.
+    """
 
     values: dict[str, str] = {}
     for part in shlex.split(line):
@@ -36,7 +43,15 @@ def parse_lsblk_line(line: str) -> dict[str, str]:
 
 
 def find_rpi_rp2() -> Optional[Rp2Device]:
-    """Locate the Pico BOOTSEL mass-storage device, if present."""
+    """Locate the Pico BOOTSEL mass-storage device, if present.
+
+    Returns:
+        A populated :class:`Rp2Device` when a device labeled `RPI-RP2` exists,
+        else `None`.
+
+    Raises:
+        RuntimeError: If `lsblk` itself fails.
+    """
 
     # Some lsblk versions treat --pairs (-P) as mutually exclusive with --raw (-r).
     cmd = ["lsblk", "-P", "-n", "-o", "NAME,LABEL,MOUNTPOINT"]
@@ -53,7 +68,18 @@ def find_rpi_rp2() -> Optional[Rp2Device]:
 
 
 def ensure_rpi_rp2_mounted(mount_base: str, verbose: bool) -> Path:
-    """Return a mounted RPI-RP2 path, mounting manually if needed."""
+    """Return a mounted RPI-RP2 path, mounting manually if needed.
+
+    Args:
+        mount_base: Fallback mount path used if device is present but unmounted.
+        verbose: Whether to print mount operations.
+
+    Returns:
+        Mountpoint path for the BOOTSEL drive.
+
+    Raises:
+        RuntimeError: If the device cannot be found or mounted.
+    """
 
     rp2 = find_rpi_rp2()
     if rp2 is None:
@@ -75,7 +101,19 @@ def ensure_rpi_rp2_mounted(mount_base: str, verbose: bool) -> Path:
 
 
 def wait_for_bootsel_mount(timeout: float, mount_base: str, verbose: bool) -> Path:
-    """Wait for the RPI-RP2 drive to appear and return its mountpoint."""
+    """Wait until the BOOTSEL drive appears and return its mountpoint.
+
+    Args:
+        timeout: Maximum time in seconds to wait.
+        mount_base: Fallback mount path used when auto-mount is absent.
+        verbose: Whether to print mount attempts.
+
+    Returns:
+        Mountpoint path for the BOOTSEL drive.
+
+    Raises:
+        RuntimeError: If the drive is not available before timeout.
+    """
 
     deadline = time.time() + timeout
     last_error: Optional[str] = None
@@ -89,7 +127,16 @@ def wait_for_bootsel_mount(timeout: float, mount_base: str, verbose: bool) -> Pa
 
 
 def copy_uf2(uf2_path: Path, mountpoint: Path, verbose: bool) -> None:
-    """Copy a UF2 file to the mounted RPI-RP2 volume and flush buffers."""
+    """Copy a UF2 file to the BOOTSEL drive and flush filesystem buffers.
+
+    Args:
+        uf2_path: Source UF2 file path.
+        mountpoint: Mounted BOOTSEL path.
+        verbose: Whether to print copy progress.
+
+    Raises:
+        RuntimeError: If the UF2 source path does not exist.
+    """
 
     if not uf2_path.exists():
         raise RuntimeError(f"UF2 file not found: {uf2_path}")
@@ -100,7 +147,16 @@ def copy_uf2(uf2_path: Path, mountpoint: Path, verbose: bool) -> None:
 
 
 def wait_for_serial_port(port: str, timeout: float, verbose: bool) -> None:
-    """Wait until the serial device path exists."""
+    """Wait until the expected serial device path exists.
+
+    Args:
+        port: Serial device path to watch.
+        timeout: Maximum time in seconds to wait.
+        verbose: Whether to print discovery status.
+
+    Raises:
+        RuntimeError: If the port is not available before timeout.
+    """
 
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -117,7 +173,16 @@ def read_banner(
     baud: int = 115200,
     timeout: float = 1.0,
 ) -> tuple[Optional[str], str]:
-    """Read serial lines briefly and infer firmware mode from banner tags."""
+    """Read serial output and infer firmware mode from known banner tags.
+
+    Args:
+        port: Serial device path.
+        baud: Serial baud rate.
+        timeout: Maximum time in seconds to read banner output.
+
+    Returns:
+        Tuple of `(mode, last_line)` where mode is `"py"`, `"cpp"`, or `None`.
+    """
 
     last_line = ""
     with serial.Serial(port, baudrate=baud, timeout=0.1) as ser:
@@ -137,7 +202,12 @@ def read_banner(
 
 
 def trigger_from_cpp(port: str, verbose: bool) -> None:
-    """Send the BOOTSEL trigger sequence expected by C++ firmware."""
+    """Send the BOOTSEL trigger sequence expected by C++ firmware.
+
+    Args:
+        port: Serial device path.
+        verbose: Whether to print trigger activity.
+    """
 
     if verbose:
         print("Triggering BOOTSEL from C++ firmware...")

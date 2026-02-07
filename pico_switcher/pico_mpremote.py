@@ -8,7 +8,7 @@ from typing import Iterable, Optional
 
 
 def _format_mpremote_error(result: subprocess.CompletedProcess[str]) -> str:
-    """Extract a readable error message from a completed mpremote process."""
+    """Extract the most useful error text from a completed `mpremote` process."""
 
     return (result.stderr or result.stdout or "").strip()
 
@@ -18,7 +18,19 @@ def run_mpremote(
     quiet: bool = False,
     allow_error: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    """Run mpremote and optionally raise if the command fails."""
+    """Run `mpremote` and optionally raise on non-zero exit.
+
+    Args:
+        args: Arguments passed to `mpremote`.
+        quiet: If `True`, capture stdout/stderr for controlled error reporting.
+        allow_error: If `True`, return failures instead of raising.
+
+    Returns:
+        The completed process object.
+
+    Raises:
+        RuntimeError: If `mpremote` fails and `allow_error` is `False`.
+    """
 
     cmd = ["mpremote", *args]
     result = subprocess.run(
@@ -36,7 +48,15 @@ def run_mpremote(
 
 
 def probe_micropython(port: str, verbose: bool) -> bool:
-    """Try a tiny mpremote exec to confirm MicroPython is responding."""
+    """Probe the device for a responding MicroPython runtime.
+
+    Args:
+        port: Serial device path for `mpremote connect`.
+        verbose: Whether to print probe diagnostics.
+
+    Returns:
+        `True` when a minimal `mpremote exec` succeeds, otherwise `False`.
+    """
 
     result = run_mpremote(
         ["connect", port, "exec", "print('FW:PY')"],
@@ -55,7 +75,15 @@ def probe_micropython(port: str, verbose: bool) -> bool:
 
 
 def trigger_from_py(port: str, verbose: bool) -> Optional[str]:
-    """Ask MicroPython to enter BOOTSEL mode using the helper module."""
+    """Ask MicroPython firmware to enter BOOTSEL mode.
+
+    Args:
+        port: Serial device path for `mpremote connect`.
+        verbose: Whether to print trigger diagnostics.
+
+    Returns:
+        `None` on success, otherwise a user-facing error summary.
+    """
 
     if verbose:
         print("Triggering BOOTSEL from MicroPython...")
@@ -77,12 +105,29 @@ def install_micropython_helpers(
     helper_files: Iterable[Path],
     verbose: bool,
 ) -> None:
-    """Copy helper files to a MicroPython device using mpremote."""
+    """Copy helper files to a MicroPython filesystem via `mpremote`.
 
-    for file_path in helper_files:
-        if not file_path.exists():
-            raise RuntimeError(f"Missing helper file: {file_path}")
+    Args:
+        port: Serial device path for `mpremote connect`.
+        helper_files: Paths that must exist locally before copy.
+        verbose: Whether to print install progress.
+
+    Raises:
+        RuntimeError: If any helper file path is missing or copy fails.
+    """
+
+    resolved_files = _require_helper_files(helper_files)
     if verbose:
         print(f"Installing MicroPython helper files to {port}...")
-    for file_path in helper_files:
+    for file_path in resolved_files:
         run_mpremote(["connect", port, "fs", "cp", str(file_path), ":"], quiet=not verbose)
+
+
+def _require_helper_files(helper_files: Iterable[Path]) -> tuple[Path, ...]:
+    """Materialize and validate helper file paths before copy operations."""
+
+    resolved_files = tuple(helper_files)
+    for file_path in resolved_files:
+        if not file_path.exists():
+            raise RuntimeError(f"Missing helper file: {file_path}")
+    return resolved_files

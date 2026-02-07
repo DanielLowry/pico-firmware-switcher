@@ -23,7 +23,11 @@ DEFAULT_HELPER_FILES = (
 
 
 def add_common_switch_args(parser: argparse.ArgumentParser) -> None:
-    """Register arguments shared by the to-py and to-cpp subcommands."""
+    """Register CLI arguments shared by `to-py` and `to-cpp`.
+
+    Args:
+        parser: Subparser instance to populate.
+    """
 
     parser.add_argument("--port", default=DEFAULT_PORT, help=f"Serial port (default: {DEFAULT_PORT})")
     parser.add_argument(
@@ -64,7 +68,7 @@ def add_common_switch_args(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Create the top-level CLI parser with subcommands."""
+    """Construct and return the full CLI argument parser."""
 
     parser = argparse.ArgumentParser(description="Pico firmware switcher CLI (Linux)")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -105,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    """CLI entrypoint for Pico firmware switching."""
+    """Run the firmware switcher CLI and return a process exit code."""
 
     parser = build_parser()
     args = parser.parse_args()
@@ -125,52 +129,20 @@ def main() -> int:
                 mount_base=args.mount_base,
                 verbose=args.verbose,
             )
-            copy_uf2(uf2_path=Path(args.uf2).expanduser(), mountpoint=mountpoint, verbose=args.verbose)
+            copy_uf2(uf2_path=_expand_path(args.uf2), mountpoint=mountpoint, verbose=args.verbose)
             return 0
 
         if args.command == "to-py":
-            flashed = switch_firmware(
-                target="py",
-                port=args.port,
-                mode=args.mode,
-                uf2_path=Path(args.uf2).expanduser(),
-                mount_base=args.mount_base,
-                detect_timeout=args.detect_timeout,
-                bootsel_timeout=args.bootsel_timeout,
-                install_helpers=args.install_helpers,
-                helper_files=DEFAULT_HELPER_FILES,
-                serial_wait=args.serial_wait,
-                force_flash=args.force_flash,
-                verbose=args.verbose,
-            )
-            if flashed:
-                print("Switched to MicroPython UF2.")
-            else:
-                print("Already in MicroPython mode; skipped UF2 flash.")
+            flashed = _run_switch(args=args, target="py", install_helpers=args.install_helpers)
+            _print_switch_result(target="py", flashed=flashed)
             detect_timeout = max(args.detect_timeout, 2.0)
             mode = detect_mode_safe(port=args.port, timeout=detect_timeout, verbose=args.verbose)
             print(f"detect: {mode or 'unknown'}")
             return 0
 
         if args.command == "to-cpp":
-            flashed = switch_firmware(
-                target="cpp",
-                port=args.port,
-                mode=args.mode,
-                uf2_path=Path(args.uf2).expanduser(),
-                mount_base=args.mount_base,
-                detect_timeout=args.detect_timeout,
-                bootsel_timeout=args.bootsel_timeout,
-                install_helpers=False,
-                helper_files=DEFAULT_HELPER_FILES,
-                serial_wait=args.serial_wait,
-                force_flash=args.force_flash,
-                verbose=args.verbose,
-            )
-            if flashed:
-                print("Switched to C++ UF2.")
-            else:
-                print("Already in C++ mode; skipped UF2 flash.")
+            flashed = _run_switch(args=args, target="cpp", install_helpers=False)
+            _print_switch_result(target="cpp", flashed=flashed)
             return 0
 
         if args.command == "install-py-files":
@@ -186,3 +158,46 @@ def main() -> int:
     except Exception as exc:  # pragma: no cover - command line error path
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+
+
+def _run_switch(args: argparse.Namespace, target: str, install_helpers: bool) -> bool:
+    """Invoke the common switch workflow used by `to-py` and `to-cpp`.
+
+    Args:
+        args: Parsed CLI namespace containing switch settings.
+        target: Firmware target (`"py"` or `"cpp"`).
+        install_helpers: Whether helper file installation should be enabled.
+
+    Returns:
+        `True` when a UF2 flash occurred, otherwise `False`.
+    """
+
+    return switch_firmware(
+        target=target,
+        port=args.port,
+        mode=args.mode,
+        uf2_path=_expand_path(args.uf2),
+        mount_base=args.mount_base,
+        detect_timeout=args.detect_timeout,
+        bootsel_timeout=args.bootsel_timeout,
+        install_helpers=install_helpers,
+        helper_files=DEFAULT_HELPER_FILES,
+        serial_wait=args.serial_wait,
+        force_flash=args.force_flash,
+        verbose=args.verbose,
+    )
+
+
+def _print_switch_result(target: str, flashed: bool) -> None:
+    """Print the post-switch status line shown to CLI users."""
+
+    if target == "py":
+        print("Switched to MicroPython UF2." if flashed else "Already in MicroPython mode; skipped UF2 flash.")
+        return
+    print("Switched to C++ UF2." if flashed else "Already in C++ mode; skipped UF2 flash.")
+
+
+def _expand_path(path_value: str) -> Path:
+    """Expand a user-provided path string to a filesystem path."""
+
+    return Path(path_value).expanduser()
