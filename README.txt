@@ -29,8 +29,19 @@ Prerequisites
 - Linux only (scripts assume `/dev/ttyACM*` and `lsblk`).
 - Python 3.10+ and `uv` (recommended) or `pip`.
 - `mpremote` installed and able to talk to your Pico (for the MicroPython trigger).
+- Pico SDK installed and `PICO_SDK_PATH` exported (required for the C++ build; see below).
+- ARM GCC toolchain (`arm-none-eabi-gcc`) available on `PATH` or set via `PICO_TOOLCHAIN_PATH`.
+- A build tool installed (`make` or `ninja`).
 - Pico shows up as `RPI-RP2` when in BOOTSEL mode.
 - A serial port path for the Pico (commonly `/dev/ttyACM0` on Linux).
+
+Pico SDK setup (required for the C++ build)
+1) Get the SDK (with submodules). Command: `git clone --recursive https://github.com/raspberrypi/pico-sdk`
+2) Export `PICO_SDK_PATH` to the SDK root (one-off): `export PICO_SDK_PATH=path_to_sdk`
+
+Toolchain + build tools (for Linux)
+- Debian/Ubuntu: `sudo apt update` then `sudo apt install -y gcc-arm-none-eabi cmake make`
+- If you prefer Ninja: `sudo apt install -y ninja-build`, then use `cmake -G Ninja ..` and `ninja bootloader_trigger`
 
 Python environment setup (uv)
 ```
@@ -55,6 +66,10 @@ Build the C++ UF2
   make bootloader_trigger
   ```
   The UF2 will be at `cpp/build/bootloader_trigger.uf2` (copy or link it into `uf2s/` if you want it alongside the others).
+
+Common CMake errors and fixes
+- `Compiler 'arm-none-eabi-gcc' not found`. Fix: install `gcc-arm-none-eabi` or set `PICO_TOOLCHAIN_PATH` to the directory that contains `bin/arm-none-eabi-gcc`. Example: `export PICO_TOOLCHAIN_PATH=/opt/gcc-arm-none-eabi-*/bin`
+- `CMake was unable to find a build program corresponding to "Unix Makefiles"`. Fix: install `make` or switch to Ninja (`sudo apt install ninja-build`, then re-run `cmake -G Ninja ..`).
 
 Usage (single CLI, recommended)
 1) Switch to MicroPython

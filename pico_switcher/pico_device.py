@@ -202,7 +202,7 @@ def read_banner(
 
 
 def trigger_from_cpp(port: str, verbose: bool) -> None:
-    """Send the BOOTSEL trigger sequence expected by C++ firmware.
+    """Send the BOOTSEL trigger command expected by C++ firmware.
 
     Args:
         port: Serial device path.
@@ -212,9 +212,5 @@ def trigger_from_cpp(port: str, verbose: bool) -> None:
     if verbose:
         print("Triggering BOOTSEL from C++ firmware...")
     with serial.Serial(port, baudrate=115200, timeout=0.2) as ser:
-        # Send both new and legacy trigger sequences for compatibility.
         ser.write(b"b")
-        ser.flush()
-        time.sleep(0.15)
-        ser.write(b"ru")
         ser.flush()
