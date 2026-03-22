@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from typing import Iterable, Optional
 
+from .pico_device import resolve_serial_port
+
 
 def _format_mpremote_error(result: subprocess.CompletedProcess[str]) -> str:
     """Extract the most useful error text from a completed `mpremote` process."""
@@ -58,8 +60,9 @@ def probe_micropython(port: str, verbose: bool) -> bool:
         `True` when a minimal `mpremote exec` succeeds, otherwise `False`.
     """
 
+    resolved_port = resolve_serial_port(port=port, verbose=verbose)
     result = run_mpremote(
-        ["connect", port, "exec", "print('FW:PY')"],
+        ["connect", resolved_port, "exec", "print('FW:PY')"],
         quiet=True,
         allow_error=True,
     )
@@ -87,8 +90,9 @@ def trigger_from_py(port: str, verbose: bool) -> Optional[str]:
 
     if verbose:
         print("Triggering BOOTSEL from MicroPython...")
+    resolved_port = resolve_serial_port(port=port, verbose=verbose)
     result = run_mpremote(
-        ["connect", port, "exec", "import bootloader_trigger"],
+        ["connect", resolved_port, "exec", "import bootloader_trigger"],
         quiet=not verbose,
         allow_error=True,
     )
@@ -117,10 +121,11 @@ def install_micropython_helpers(
     """
 
     resolved_files = _require_helper_files(helper_files)
+    resolved_port = resolve_serial_port(port=port, verbose=verbose)
     if verbose:
-        print(f"Installing MicroPython helper files to {port}...")
+        print(f"Installing MicroPython helper files to {resolved_port}...")
     for file_path in resolved_files:
-        run_mpremote(["connect", port, "fs", "cp", str(file_path), ":"], quiet=not verbose)
+        run_mpremote(["connect", resolved_port, "fs", "cp", str(file_path), ":"], quiet=not verbose)
 
 
 def _require_helper_files(helper_files: Iterable[Path]) -> tuple[Path, ...]:

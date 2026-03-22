@@ -13,6 +13,7 @@ from typing import Optional
 
 try:
     import serial  # type: ignore
+    from serial.tools import list_ports  # type: ignore
 except ImportError as exc:  # pragma: no cover - runtime dependency check
     raise SystemExit("pyserial is required: pip install pyserial") from exc
 
@@ -23,6 +24,65 @@ class Rp2Device:
 
     name: str
     mountpoint: str
+
+
+def list_serial_port_candidates() -> tuple[str, ...]:
+    """Return likely USB serial device paths that could belong to a Pico."""
+
+    candidates = sorted(
+        {
+            info.device
+            for info in list_ports.comports()
+            if info.device.startswith("/dev/ttyACM") or info.device.startswith("/dev/ttyUSB")
+        }
+    )
+    return tuple(candidates)
+
+
+def resolve_serial_port(port: str, verbose: bool) -> str:
+    """Resolve a configured serial port to an existing device path.
+
+    The CLI accepts `"auto"` to pick a single connected USB serial device.
+    For compatibility, a missing `/dev/ttyACM0` also falls back to a single
+    discovered candidate.
+    """
+
+    candidates = list_serial_port_candidates()
+
+    if port == "auto":
+        if len(candidates) == 1:
+            if verbose:
+                print(f"Using discovered serial port: {candidates[0]}")
+            return candidates[0]
+        if not candidates:
+            raise RuntimeError(_missing_serial_port_message(port=port, candidates=candidates))
+        raise RuntimeError(
+            "Multiple serial ports found: "
+            + ", ".join(candidates)
+            + ". Use --port to select the Pico explicitly."
+        )
+
+    if Path(port).exists():
+        return port
+
+    if port == "/dev/ttyACM0" and len(candidates) == 1:
+        if verbose:
+            print(f"{port} not present; using discovered serial port {candidates[0]}")
+        return candidates[0]
+
+    raise RuntimeError(_missing_serial_port_message(port=port, candidates=candidates))
+
+
+def _missing_serial_port_message(port: str, candidates: tuple[str, ...]) -> str:
+    """Format a user-facing error for missing or ambiguous serial ports."""
+
+    port_label = "No serial port was selected" if port == "auto" else f"Serial port not found: {port}"
+    if candidates:
+        return f"{port_label}. Available USB serial ports: {', '.join(candidates)}"
+    return (
+        f"{port_label}. No USB serial ports were detected under /dev/ttyACM* or /dev/ttyUSB*. "
+        "If the Pico is already in BOOTSEL mode, use `pico.py flash ...` or `--mode bootsel`."
+    )
 
 
 def parse_lsblk_line(line: str) -> dict[str, str]:
@@ -146,7 +206,7 @@ def copy_uf2(uf2_path: Path, mountpoint: Path, verbose: bool) -> None:
     os.sync()
 
 
-def wait_for_serial_port(port: str, timeout: float, verbose: bool) -> None:
+def wait_for_serial_port(port: str, timeout: float, verbose: bool) -> str:
     """Wait until the expected serial device path exists.
 
     Args:
@@ -154,24 +214,32 @@ def wait_for_serial_port(port: str, timeout: float, verbose: bool) -> None:
         timeout: Maximum time in seconds to wait.
         verbose: Whether to print discovery status.
 
+    Returns:
+        Resolved serial device path.
+
     Raises:
         RuntimeError: If the port is not available before timeout.
     """
 
     deadline = time.time() + timeout
+    last_error: Optional[str] = None
     while time.time() < deadline:
-        if Path(port).exists():
+        try:
+            resolved_port = resolve_serial_port(port=port, verbose=verbose)
             if verbose:
-                print(f"Serial port available: {port}")
-            return
+                print(f"Serial port available: {resolved_port}")
+            return resolved_port
+        except RuntimeError as exc:
+            last_error = str(exc)
         time.sleep(0.2)
-    raise RuntimeError(f"Timed out waiting for serial port: {port}")
+    raise RuntimeError(last_error or f"Timed out waiting for serial port: {port}")
 
 
 def read_banner(
     port: str,
     baud: int = 115200,
     timeout: float = 1.0,
+    verbose: bool = False,
 ) -> tuple[Optional[str], str]:
     """Read serial output and infer firmware mode from known banner tags.
 
@@ -179,13 +247,15 @@ def read_banner(
         port: Serial device path.
         baud: Serial baud rate.
         timeout: Maximum time in seconds to read banner output.
+        verbose: Whether to print port auto-resolution details.
 
     Returns:
         Tuple of `(mode, last_line)` where mode is `"py"`, `"cpp"`, or `None`.
     """
 
     last_line = ""
-    with serial.Serial(port, baudrate=baud, timeout=0.1) as ser:
+    resolved_port = resolve_serial_port(port=port, verbose=verbose)
+    with serial.Serial(resolved_port, baudrate=baud, timeout=0.1) as ser:
         ser.reset_input_buffer()
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -211,6 +281,7 @@ def trigger_from_cpp(port: str, verbose: bool) -> None:
 
     if verbose:
         print("Triggering BOOTSEL from C++ firmware...")
-    with serial.Serial(port, baudrate=115200, timeout=0.2) as ser:
+    resolved_port = resolve_serial_port(port=port, verbose=verbose)
+    with serial.Serial(resolved_port, baudrate=115200, timeout=0.2) as ser:
         ser.write(b"b")
         ser.flush()

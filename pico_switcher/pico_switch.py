@@ -39,7 +39,7 @@ def detect_mode(port: str, timeout: float, verbose: bool) -> Optional[str]:
             print("Detected BOOTSEL mode via RPI-RP2 device")
         return "bootsel"
 
-    mode, banner = read_banner(port=port, timeout=timeout)
+    mode, banner = read_banner(port=port, timeout=timeout, verbose=verbose)
     if verbose:
         if mode:
             print(f"Detected mode from serial banner: {mode} ({banner})")
@@ -202,5 +202,5 @@ def _install_helpers_if_requested(
 
     if target != "py" or not install_helpers:
         return
-    wait_for_serial_port(port=port, timeout=serial_wait, verbose=verbose)
-    install_micropython_helpers(port=port, helper_files=helper_files, verbose=verbose)
+    resolved_port = wait_for_serial_port(port=port, timeout=serial_wait, verbose=verbose)
+    install_micropython_helpers(port=resolved_port, helper_files=helper_files, verbose=verbose)

@@ -12,7 +12,7 @@ from .pico_switch import detect_mode, detect_mode_safe, switch_firmware
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_PORT = "/dev/ttyACM0"
+DEFAULT_PORT = "auto"
 DEFAULT_MOUNT = "/mnt/pico"
 DEFAULT_PY_UF2 = ROOT / "uf2s" / "Pico-MicroPython-20250415-v1.25.0.uf2"
 DEFAULT_CPP_UF2 = ROOT / "uf2s" / "bootloader_trigger.uf2"
@@ -20,6 +20,7 @@ DEFAULT_HELPER_FILES = (
     ROOT / "py" / "boot.py",
     ROOT / "py" / "bootloader_trigger.py",
 )
+PORT_HELP = "Serial port path, or 'auto' to use a single detected /dev/ttyACM* or /dev/ttyUSB* device"
 
 
 def add_common_switch_args(parser: argparse.ArgumentParser) -> None:
@@ -29,7 +30,7 @@ def add_common_switch_args(parser: argparse.ArgumentParser) -> None:
         parser: Subparser instance to populate.
     """
 
-    parser.add_argument("--port", default=DEFAULT_PORT, help=f"Serial port (default: {DEFAULT_PORT})")
+    parser.add_argument("--port", default=DEFAULT_PORT, help=f"{PORT_HELP} (default: {DEFAULT_PORT})")
     parser.add_argument(
         "--mode",
         default="auto",
@@ -74,7 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     detect_cmd = subparsers.add_parser("detect", help="Detect current Pico firmware mode")
-    detect_cmd.add_argument("--port", default=DEFAULT_PORT)
+    detect_cmd.add_argument("--port", default=DEFAULT_PORT, help=f"{PORT_HELP} (default: {DEFAULT_PORT})")
     detect_cmd.add_argument("--timeout", type=float, default=1.5)
     detect_cmd.add_argument("--verbose", action="store_true")
 
@@ -102,7 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
         "install-py-files",
         help="Copy py/boot.py and py/bootloader_trigger.py to a MicroPython Pico",
     )
-    install_cmd.add_argument("--port", default=DEFAULT_PORT)
+    install_cmd.add_argument("--port", default=DEFAULT_PORT, help=f"{PORT_HELP} (default: {DEFAULT_PORT})")
     install_cmd.add_argument("--verbose", action="store_true")
 
     return parser
