@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Optional
 
+from . import PROJECT_ROOT
 from .pico_device import (
     copy_uf2,
     find_rpi_rp2,
@@ -13,10 +14,27 @@ from .pico_device import (
     wait_for_bootsel_mount,
     wait_for_serial_port,
 )
-from .pico_mpremote import install_micropython_helpers, probe_micropython, trigger_from_py
+from .pico_log import EventRecorder
+from .pico_mpremote import DEFAULT_HELPER_FILES, install_micropython_helpers, probe_micropython, trigger_from_py
 
 
-def detect_mode(port: str, timeout: float, verbose: bool) -> Optional[str]:
+DEFAULT_MODE = "auto"
+DEFAULT_DETECT_TIMEOUT = 1.5
+DEFAULT_BOOTSEL_TIMEOUT = 10.0
+DEFAULT_SERIAL_WAIT = 12.0
+DEFAULT_INSTALL_HELPERS = True
+MIN_POST_SWITCH_DETECT_TIMEOUT = 2.0
+DEFAULT_PY_UF2 = PROJECT_ROOT / "uf2s" / "Pico-MicroPython-20250415-v1.25.0.uf2"
+DEFAULT_CPP_UF2 = PROJECT_ROOT / "uf2s" / "bootloader_trigger.uf2"
+
+
+def detect_mode(
+    port: str,
+    timeout: float,
+    verbose: bool,
+    recorder: Optional[EventRecorder] = None,
+    reason: str = "detect",
+) -> Optional[str]:
     """Detect the current firmware mode.
 
     Detection order is intentionally conservative:
@@ -37,6 +55,18 @@ def detect_mode(port: str, timeout: float, verbose: bool) -> Optional[str]:
     if rp2 is not None:
         if verbose:
             print("Detected BOOTSEL mode via RPI-RP2 device")
+        if recorder is not None:
+            recorder.event(
+                "detect_mode",
+                mode="bootsel",
+                port=port,
+                mountpoint=rp2.mountpoint or None,
+                message="Detected BOOTSEL mode via RPI-RP2 device",
+                details={
+                    "reason": reason,
+                    "device": rp2.name,
+                },
+            )
         return "bootsel"
 
     mode, banner = read_banner(port=port, timeout=timeout, verbose=verbose)
@@ -48,15 +78,51 @@ def detect_mode(port: str, timeout: float, verbose: bool) -> Optional[str]:
         else:
             print("No serial banner read within timeout")
     if mode:
+        if recorder is not None:
+            recorder.event(
+                "detect_mode",
+                mode=mode,
+                port=port,
+                message="Detected firmware mode from serial banner",
+                details={
+                    "reason": reason,
+                    "banner": banner,
+                },
+            )
         return mode
 
     if probe_micropython(port=port, verbose=verbose):
+        if recorder is not None:
+            recorder.event(
+                "detect_mode",
+                mode="py",
+                port=port,
+                message="Detected MicroPython via mpremote probe",
+                details={"reason": reason},
+            )
         return "py"
 
+    if recorder is not None:
+        recorder.event(
+            "detect_mode",
+            status="unknown",
+            port=port,
+            message="Could not determine Pico firmware mode",
+            details={
+                "reason": reason,
+                "last_banner": banner or None,
+            },
+        )
     return None
 
 
-def detect_mode_safe(port: str, timeout: float, verbose: bool) -> Optional[str]:
+def detect_mode_safe(
+    port: str,
+    timeout: float,
+    verbose: bool,
+    recorder: Optional[EventRecorder] = None,
+    reason: str = "detect_safe",
+) -> Optional[str]:
     """Run :func:`detect_mode` but swallow errors.
 
     Args:
@@ -69,10 +135,24 @@ def detect_mode_safe(port: str, timeout: float, verbose: bool) -> Optional[str]:
     """
 
     try:
-        return detect_mode(port=port, timeout=timeout, verbose=verbose)
+        return detect_mode(
+            port=port,
+            timeout=timeout,
+            verbose=verbose,
+            recorder=recorder,
+            reason=reason,
+        )
     except Exception as exc:
         if verbose:
             print(f"Post-switch detect failed: {exc}")
+        if recorder is not None:
+            recorder.event(
+                "detect_mode",
+                status="error",
+                port=port,
+                message=str(exc),
+                details={"reason": reason},
+            )
         return None
 
 
@@ -85,10 +165,11 @@ def switch_firmware(
     detect_timeout: float,
     bootsel_timeout: float,
     install_helpers: bool,
-    helper_files: Iterable[Path],
+    helper_files: Optional[Iterable[Path]],
     serial_wait: float,
     force_flash: bool,
     verbose: bool,
+    recorder: Optional[EventRecorder] = None,
 ) -> bool:
     """Switch Pico firmware to the requested target mode.
 
@@ -108,7 +189,8 @@ def switch_firmware(
         detect_timeout: Banner detection timeout for auto mode resolution.
         bootsel_timeout: Timeout while waiting for BOOTSEL mass storage.
         install_helpers: Whether to copy helper files after a MicroPython target boot.
-        helper_files: Files to copy when helper installation is enabled.
+        helper_files: Files to copy when helper installation is enabled. When `None`,
+            the bundled MicroPython helper files are used.
         serial_wait: Timeout while waiting for serial port after flash.
         force_flash: Flash even if current mode already equals target.
         verbose: Whether to print detailed operation logs.
@@ -121,24 +203,79 @@ def switch_firmware(
             or helper installation prerequisites are missing.
     """
 
+    resolved_helper_files = tuple(helper_files or DEFAULT_HELPER_FILES)
+
+    if recorder is not None:
+        recorder.event(
+            "switch_requested",
+            target_mode=target,
+            port=port,
+            message="Firmware switch requested",
+            details={
+                "mode_override": mode,
+                "force_flash": force_flash,
+                "uf2_path": str(uf2_path),
+            },
+        )
+
     selected_mode = mode
     if selected_mode == "auto":
-        selected_mode = detect_mode(port=port, timeout=detect_timeout, verbose=verbose) or "unknown"
+        selected_mode = (
+            detect_mode(
+                port=port,
+                timeout=detect_timeout,
+                verbose=verbose,
+                recorder=recorder,
+                reason="switch_preflight",
+            )
+            or "unknown"
+        )
 
     if selected_mode == target and not force_flash:
         if verbose:
             print(f"Already in {target} mode, skipping UF2 flash.")
+        if recorder is not None:
+            recorder.event(
+                "switch_skipped",
+                mode=selected_mode,
+                target_mode=target,
+                port=port,
+                message="Device already in target mode; skipped UF2 flash",
+                details={"uf2_path": str(uf2_path)},
+            )
         _install_helpers_if_requested(
             target=target,
             install_helpers=install_helpers,
             port=port,
-            helper_files=helper_files,
+            helper_files=resolved_helper_files,
             serial_wait=serial_wait,
             verbose=verbose,
+            recorder=recorder,
         )
         return False
 
-    trigger_error = _trigger_bootsel(selected_mode=selected_mode, port=port, verbose=verbose)
+    try:
+        trigger_error = _trigger_bootsel(selected_mode=selected_mode, port=port, verbose=verbose)
+    except Exception as exc:
+        if recorder is not None:
+            recorder.event(
+                "bootsel_trigger",
+                status="error",
+                mode=selected_mode,
+                target_mode=target,
+                port=port,
+                message=str(exc),
+            )
+        raise
+    if recorder is not None:
+        recorder.event(
+            "bootsel_trigger",
+            status="warning" if trigger_error else "ok",
+            mode=selected_mode,
+            target_mode=target,
+            port=port,
+            message=trigger_error or "Requested BOOTSEL transition",
+        )
 
     try:
         mountpoint = wait_for_bootsel_mount(
@@ -147,19 +284,69 @@ def switch_firmware(
             verbose=verbose,
         )
     except RuntimeError as exc:
+        if recorder is not None:
+            recorder.event(
+                "bootsel_mount",
+                status="error",
+                target_mode=target,
+                port=port,
+                message=str(exc),
+                details={"mount_base": mount_base},
+            )
         if trigger_error:
             raise RuntimeError(f"MicroPython trigger failed: {trigger_error}") from exc
         raise
-    copy_uf2(uf2_path=uf2_path, mountpoint=mountpoint, verbose=verbose)
+    if recorder is not None:
+        recorder.event(
+            "bootsel_mount",
+            mode="bootsel",
+            target_mode=target,
+            port=port,
+            mountpoint=str(mountpoint),
+            message="BOOTSEL mass-storage device is ready",
+            details={"mount_base": mount_base},
+        )
+    try:
+        copy_uf2(uf2_path=uf2_path, mountpoint=mountpoint, verbose=verbose)
+    except Exception as exc:
+        if recorder is not None:
+            recorder.event(
+                "uf2_flash",
+                status="error",
+                target_mode=target,
+                port=port,
+                mountpoint=str(mountpoint),
+                message=str(exc),
+                details={"uf2_path": str(uf2_path)},
+            )
+        raise
+    if recorder is not None:
+        recorder.event(
+            "uf2_flash",
+            target_mode=target,
+            port=port,
+            mountpoint=str(mountpoint),
+            message=f"Flashed {uf2_path.name}",
+            details={"uf2_path": str(uf2_path)},
+        )
 
     _install_helpers_if_requested(
         target=target,
         install_helpers=install_helpers,
         port=port,
-        helper_files=helper_files,
+        helper_files=resolved_helper_files,
         serial_wait=serial_wait,
         verbose=verbose,
+        recorder=recorder,
     )
+    if recorder is not None:
+        recorder.event(
+            "switch_completed",
+            target_mode=target,
+            port=port,
+            message="Firmware switch workflow completed",
+            details={"uf2_path": str(uf2_path)},
+        )
     return True
 
 
@@ -197,10 +384,31 @@ def _install_helpers_if_requested(
     helper_files: Iterable[Path],
     serial_wait: float,
     verbose: bool,
+    recorder: Optional[EventRecorder] = None,
 ) -> None:
     """Install MicroPython helper files when target and flags require it."""
 
     if target != "py" or not install_helpers:
         return
-    resolved_port = wait_for_serial_port(port=port, timeout=serial_wait, verbose=verbose)
-    install_micropython_helpers(port=resolved_port, helper_files=helper_files, verbose=verbose)
+    try:
+        resolved_port = wait_for_serial_port(port=port, timeout=serial_wait, verbose=verbose)
+        install_micropython_helpers(port=resolved_port, helper_files=helper_files, verbose=verbose)
+    except Exception as exc:
+        if recorder is not None:
+            recorder.event(
+                "helpers_install",
+                status="error",
+                target_mode=target,
+                port=port,
+                message=str(exc),
+                details={"helper_files": [str(file_path) for file_path in helper_files]},
+            )
+        raise
+    if recorder is not None:
+        recorder.event(
+            "helpers_install",
+            target_mode=target,
+            port=resolved_port,
+            message="Installed MicroPython helper files",
+            details={"helper_files": [str(file_path) for file_path in helper_files]},
+        )

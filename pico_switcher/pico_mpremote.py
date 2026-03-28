@@ -6,7 +6,14 @@ import subprocess
 from pathlib import Path
 from typing import Iterable, Optional
 
+from . import PROJECT_ROOT
 from .pico_device import resolve_serial_port
+
+
+DEFAULT_HELPER_FILES = (
+    PROJECT_ROOT / "py" / "boot.py",
+    PROJECT_ROOT / "py" / "bootloader_trigger.py",
+)
 
 
 def _format_mpremote_error(result: subprocess.CompletedProcess[str]) -> str:
@@ -106,14 +113,15 @@ def trigger_from_py(port: str, verbose: bool) -> Optional[str]:
 
 def install_micropython_helpers(
     port: str,
-    helper_files: Iterable[Path],
-    verbose: bool,
+    helper_files: Iterable[Path] = DEFAULT_HELPER_FILES,
+    verbose: bool = False,
 ) -> None:
     """Copy helper files to a MicroPython filesystem via `mpremote`.
 
     Args:
         port: Serial device path for `mpremote connect`.
-        helper_files: Paths that must exist locally before copy.
+        helper_files: Paths that must exist locally before copy. Defaults to the
+            repo's bundled `py/boot.py` and `py/bootloader_trigger.py`.
         verbose: Whether to print install progress.
 
     Raises:

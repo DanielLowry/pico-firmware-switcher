@@ -18,6 +18,13 @@ except ImportError as exc:  # pragma: no cover - runtime dependency check
     raise SystemExit("pyserial is required: pip install pyserial") from exc
 
 
+DEFAULT_PORT = "auto"
+DEFAULT_MOUNT_BASE = "/mnt/pico"
+SERIAL_PORT_HELP = (
+    "Serial port path, or 'auto' to use a single detected /dev/ttyACM* or /dev/ttyUSB* device"
+)
+
+
 @dataclass
 class Rp2Device:
     """Represents a discovered RPI-RP2 block device entry."""
