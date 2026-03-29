@@ -183,7 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     timer_cmd = subparsers.add_parser(
         "install-state-timer",
-        help="Write systemd user units that record the current state every 5 minutes",
+        help="Write systemd user units that record the current state every 1 minutes",
     )
     timer_cmd.add_argument("--port", default=DEFAULT_PORT, help=f"{SERIAL_PORT_HELP} (default: {DEFAULT_PORT})")
     timer_cmd.add_argument("--timeout", type=float, default=DEFAULT_DETECT_TIMEOUT)
