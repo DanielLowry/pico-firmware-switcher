@@ -20,8 +20,8 @@ Plan (target workflow)
 Repo layout (relevant bits)
 - `uf2s/` — stored UF2 images (MicroPython and the built C++ bootloader).
 - `pico.py` — single host CLI for switching/detecting/flashing.
-- SQLite audit log — defaults to `~/.local/state/pico-firmware-switcher/events.sqlite3`.
-- `requirements.txt` — Python dependencies (`pyserial`, `mpremote`).
+- SQLite audit log — defaults to `.pico-switcher/events.sqlite3` in the repo root.
+- `requirements.txt` — Python dependencies (`pyserial`, `mpremote`, `peewee`, and `tomli` on Python < 3.11).
 - `py/bootloader_trigger.py` — MicroPython bootloader trigger.
 - `cpp/` — C++ sources and build outputs (including `build/bootloader_trigger.uf2`).
 - `shell/` — helper scripts for flashing and triggering.
@@ -50,6 +50,7 @@ uv venv
 source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
+- Recommended command form: `uv run python pico.py ...`
 
 Identify the current firmware
 - Make sure `py/boot.py` is on the MicroPython filesystem so it prints `FW:PY` on boot.
@@ -101,15 +102,43 @@ Usage (single CLI, recommended)
    - `python pico.py install-state-timer --port /dev/ttyACM0 --enable`
    - This writes `systemd --user` units that call `pico.py log-state` every 5 minutes and enables the timer.
 
-8) If autodetect misses your mode
+8) Create and send a one-off database backup
+   - First create `.pico-switcher/backup.toml` in the repo root:
+     ```
+     [local]
+     staging_dir = "backups"
+     compress = true
+
+     [remote]
+     host = "backup-box.local"
+     user = "backuponly"
+     path = "/srv/pico-switcher/backups"
+     ssh_key_path = "pico_switcher_backup"
+     port = 22
+     connect_timeout_seconds = 10
+     ```
+   - Then run: `python pico.py backup-db`
+   - This creates a consistent snapshot of the SQLite log database, transfers it to the configured remote host with `rsync` over SSH, and deletes the local staged copy after a successful transfer.
+
+9) If autodetect misses your mode
    - Override explicitly: `--mode py`, `--mode cpp`, or `--mode bootsel`.
 
 Logging and state history
 - Every normal CLI action now records structured events in SQLite, including mode detection, BOOTSEL triggers, UF2 flashes, helper installs, switch skips, and command failures.
-- Default database path: `~/.local/state/pico-firmware-switcher/events.sqlite3`
+- Default database path: `.pico-switcher/events.sqlite3` in the repo root
 - Override the database location with `--db-path /path/to/pico-events.sqlite3` or `PICO_SWITCHER_DB=/path/to/pico-events.sqlite3`.
 - `log-state` is intentionally tolerant: if the Pico is unplugged or detection fails, it still records a snapshot row with mode `unknown`.
 - The generated `systemd --user` service stores absolute paths to the current repo and Python interpreter. If you move the repo or recreate the venv/interpreter, rerun `install-state-timer`.
+
+Backup configuration
+- `backup-db` reads `.pico-switcher/backup.toml` in the repo root by default. Override it with `--config /path/to/backup.toml`.
+- The backup config currently controls the local staging directory, whether staged files are gzip-compressed, and the remote SSH/rsync destination.
+- `backup-db` still uses the normal `--db-path` flag to choose which SQLite file to back up.
+- Relative `staging_dir` and `ssh_key_path` values are resolved relative to the config file location, so repo-local paths work cleanly.
+- Remote backups require key-based SSH access. The configured `ssh_key_path` must point to a local private key file that already works for the remote backup account.
+- If the remote transfer fails, the staged backup file is left in the local staging directory for later manual inspection or retry.
+- `.pico-switcher/` is ignored by Git so repo-local config, staged backups, and repo-local SSH key files are not committed accidentally.
+- The one exception is installed `systemd` unit files: if you use `install-state-timer`, the generated units still need to be written somewhere `systemd` can actually load them from.
 
 Usage (manual workflow, legacy scripts)
 1) Flash MicroPython UF2 (from BOOTSEL mode)

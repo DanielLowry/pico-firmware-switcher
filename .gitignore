@@ -5,3 +5,6 @@ __pycache__/
 
 # Virtual environments
 .venv/
+
+# Repo-local backup runtime files
+.pico-switcher/

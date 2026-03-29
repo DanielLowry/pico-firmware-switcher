@@ -16,9 +16,10 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback
     import tomli as tomllib  # type: ignore
 
+from . import RUNTIME_ROOT
 
-DEFAULT_BACKUP_CONFIG_PATH = Path("~/.config/pico-firmware-switcher/backup.toml")
-DEFAULT_BACKUP_STAGING_DIR = Path("~/.local/state/pico-firmware-switcher/backups")
+DEFAULT_BACKUP_CONFIG_PATH = RUNTIME_ROOT / "backup.toml"
+DEFAULT_BACKUP_STAGING_DIR = RUNTIME_ROOT / "backups"
 DEFAULT_BACKUP_COMPRESS = True
 DEFAULT_REMOTE_PORT = 22
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 10
@@ -77,7 +78,7 @@ class BackupResult:
 def default_backup_config_path() -> Path:
     """Return the default config file path used by `backup-db`."""
 
-    return DEFAULT_BACKUP_CONFIG_PATH.expanduser()
+    return DEFAULT_BACKUP_CONFIG_PATH
 
 
 def load_backup_config(config_path: Path) -> BackupConfig:
@@ -96,6 +97,7 @@ def load_backup_config(config_path: Path) -> BackupConfig:
     local_section = _require_mapping(raw_config, "local", resolved_path)
     remote_section = _require_mapping(raw_config, "remote", resolved_path)
 
+    config_dir = resolved_path.parent
     staging_dir_value = local_section.get("staging_dir", str(DEFAULT_BACKUP_STAGING_DIR))
     compress_value = local_section.get("compress", DEFAULT_BACKUP_COMPRESS)
 
@@ -116,7 +118,7 @@ def load_backup_config(config_path: Path) -> BackupConfig:
             f"{resolved_path}: remote.path must be an absolute path, got {remote_path!r}"
         )
 
-    ssh_key_path = Path(ssh_key_value).expanduser()
+    ssh_key_path = _resolve_local_path(ssh_key_value, config_dir)
     if not ssh_key_path.exists():
         raise BackupConfigError(f"{resolved_path}: ssh key not found: {ssh_key_path}")
 
@@ -124,7 +126,7 @@ def load_backup_config(config_path: Path) -> BackupConfig:
         raise BackupConfigError(f"{resolved_path}: local.compress must be true or false")
 
     return BackupConfig(
-        staging_dir=Path(str(staging_dir_value)).expanduser(),
+        staging_dir=_resolve_local_path(str(staging_dir_value), config_dir),
         compress=compress_value,
         remote=BackupRemoteConfig(
             host=host,
@@ -284,3 +286,12 @@ def _optional_int(value: object, default: int, key: str, config_path: Path) -> i
     if not isinstance(value, int):
         raise BackupConfigError(f"{config_path}: {key} must be an integer")
     return value
+
+
+def _resolve_local_path(path_value: str, base_dir: Path) -> Path:
+    """Resolve a local path string relative to the config file when needed."""
+
+    path = Path(path_value).expanduser()
+    if path.is_absolute():
+        return path
+    return (base_dir / path).resolve()

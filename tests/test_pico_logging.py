@@ -13,13 +13,24 @@ from pico_switcher.pico_backup import (
     BackupRemoteConfig,
     BackupTransferError,
     backup_database,
+    default_backup_config_path,
     load_backup_config,
 )
+from pico_switcher import RUNTIME_ROOT
 from pico_switcher.pico_log import EventRecorder, PicoLogStore, default_db_path
 from pico_switcher.pico_systemd import install_state_timer, render_state_timer
 
 
 class PicoLogStoreTests(unittest.TestCase):
+    def test_default_db_path_is_repo_local_without_override(self) -> None:
+        original = os.environ.get("PICO_SWITCHER_DB")
+        os.environ.pop("PICO_SWITCHER_DB", None)
+        try:
+            self.assertEqual(default_db_path(), RUNTIME_ROOT / "events.sqlite3")
+        finally:
+            if original is not None:
+                os.environ["PICO_SWITCHER_DB"] = original
+
     def test_recorder_persists_events_and_snapshots(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "events.sqlite3"
@@ -73,6 +84,9 @@ class PicoLogStoreTests(unittest.TestCase):
 
 
 class PicoBackupTests(unittest.TestCase):
+    def test_default_backup_config_path_is_repo_local(self) -> None:
+        self.assertEqual(default_backup_config_path(), RUNTIME_ROOT / "backup.toml")
+
     def test_load_backup_config_reads_expected_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "backup.toml"
@@ -82,14 +96,14 @@ class PicoBackupTests(unittest.TestCase):
                 "\n".join(
                     (
                         "[local]",
-                        f'staging_dir = "{tmpdir}/staging"',
+                        'staging_dir = "staging"',
                         "compress = false",
                         "",
                         "[remote]",
                         'host = "backup-box.local"',
                         'user = "backuponly"',
                         'path = "/srv/pico/backups"',
-                        f'ssh_key_path = "{ssh_key_path}"',
+                        'ssh_key_path = "backup-key"',
                         "port = 2222",
                         "connect_timeout_seconds = 7",
                     )
@@ -104,7 +118,7 @@ class PicoBackupTests(unittest.TestCase):
             self.assertEqual(config.remote.host, "backup-box.local")
             self.assertEqual(config.remote.user, "backuponly")
             self.assertEqual(config.remote.path, "/srv/pico/backups")
-            self.assertEqual(config.remote.ssh_key_path, ssh_key_path)
+            self.assertEqual(config.remote.ssh_key_path, ssh_key_path.resolve())
             self.assertEqual(config.remote.ssh_port, 2222)
             self.assertEqual(config.remote.connect_timeout_seconds, 7)
 

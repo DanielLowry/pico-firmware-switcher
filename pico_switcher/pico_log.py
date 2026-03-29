@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from . import RUNTIME_ROOT
+
 try:
     from peewee import AutoField, Model, SqliteDatabase, TextField  # type: ignore
 except ImportError as exc:  # pragma: no cover - runtime dependency check
@@ -18,7 +20,7 @@ except ImportError as exc:  # pragma: no cover - runtime dependency check
 
 
 DB_PATH_ENV_VAR = "PICO_SWITCHER_DB"
-DEFAULT_DB_PATH = Path.home() / ".local" / "state" / "pico-firmware-switcher" / "events.sqlite3"
+DEFAULT_DB_PATH = RUNTIME_ROOT / "events.sqlite3"
 DEFAULT_HISTORY_LIMIT = 20
 DEFAULT_SNAPSHOT_SOURCE = "manual"
 EVENT_FIELD_NAMES = (
