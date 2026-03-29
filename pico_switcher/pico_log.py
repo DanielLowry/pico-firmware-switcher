@@ -1,10 +1,9 @@
-"""SQLite-backed event and state logging for Pico switcher operations."""
+"""Peewee-backed SQLite event and state logging for Pico switcher operations."""
 
 from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import sys
 import uuid
 from dataclasses import dataclass, field
@@ -12,11 +11,38 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+try:
+    from peewee import AutoField, Model, SqliteDatabase, TextField  # type: ignore
+except ImportError as exc:  # pragma: no cover - runtime dependency check
+    raise SystemExit("peewee is required: pip install peewee") from exc
+
 
 DB_PATH_ENV_VAR = "PICO_SWITCHER_DB"
 DEFAULT_DB_PATH = Path.home() / ".local" / "state" / "pico-firmware-switcher" / "events.sqlite3"
 DEFAULT_HISTORY_LIMIT = 20
 DEFAULT_SNAPSHOT_SOURCE = "manual"
+EVENT_FIELD_NAMES = (
+    "created_at",
+    "run_id",
+    "source",
+    "event_type",
+    "status",
+    "mode",
+    "target_mode",
+    "port",
+    "mountpoint",
+    "message",
+    "details_json",
+)
+SNAPSHOT_FIELD_NAMES = (
+    "created_at",
+    "run_id",
+    "source",
+    "mode",
+    "port",
+    "message",
+    "details_json",
+)
 
 
 def default_db_path() -> Path:
@@ -54,65 +80,73 @@ def _to_jsonable(value: Any) -> Any:
     return str(value)
 
 
+def _build_models(database: SqliteDatabase) -> tuple[type[Model], type[Model]]:
+    """Create model classes bound to one SQLite database instance."""
+
+    db = database
+
+    class BaseLogModel(Model):
+        class Meta:
+            database = db
+
+    class EventLogModel(BaseLogModel):
+        id = AutoField()
+        created_at = TextField(index=True)
+        run_id = TextField()
+        source = TextField()
+        event_type = TextField()
+        status = TextField()
+        mode = TextField(null=True)
+        target_mode = TextField(null=True)
+        port = TextField(null=True)
+        mountpoint = TextField(null=True)
+        message = TextField(null=True)
+        details_json = TextField(default="{}")
+
+        class Meta:
+            table_name = "event_log"
+            indexes = (
+                (("event_type", "created_at"), False),
+            )
+
+    class StateSnapshotModel(BaseLogModel):
+        id = AutoField()
+        created_at = TextField(index=True)
+        run_id = TextField()
+        source = TextField()
+        mode = TextField(null=True)
+        port = TextField(null=True)
+        message = TextField(null=True)
+        details_json = TextField(default="{}")
+
+        class Meta:
+            table_name = "state_snapshot"
+
+    return EventLogModel, StateSnapshotModel
+
+
 class PicoLogStore:
     """Manage the SQLite database used for event and snapshot logging."""
 
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path.expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
-        self._ensure_schema()
+        self._db = SqliteDatabase(
+            self.db_path,
+            pragmas={
+                "journal_mode": "wal",
+                "synchronous": "normal",
+            },
+        )
+        self._event_model, self._snapshot_model = _build_models(self._db)
+        self._db.connect(reuse_if_open=True)
+        self._db.create_tables([self._event_model, self._snapshot_model], safe=True)
 
     def close(self) -> None:
         """Close the underlying SQLite connection."""
 
-        self._conn.close()
-
-    def _ensure_schema(self) -> None:
-        """Create tables and indexes if they do not exist yet."""
-
-        self._conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS event_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                created_at TEXT NOT NULL,
-                run_id TEXT NOT NULL,
-                source TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                status TEXT NOT NULL,
-                mode TEXT,
-                target_mode TEXT,
-                port TEXT,
-                mountpoint TEXT,
-                message TEXT,
-                details_json TEXT NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_event_log_created_at
-                ON event_log(created_at DESC);
-
-            CREATE INDEX IF NOT EXISTS idx_event_log_type_created_at
-                ON event_log(event_type, created_at DESC);
-
-            CREATE TABLE IF NOT EXISTS state_snapshot (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                created_at TEXT NOT NULL,
-                run_id TEXT NOT NULL,
-                source TEXT NOT NULL,
-                mode TEXT,
-                port TEXT,
-                message TEXT,
-                details_json TEXT NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_state_snapshot_created_at
-                ON state_snapshot(created_at DESC);
-            """
-        )
-        self._conn.commit()
+        if not self._db.is_closed():
+            self._db.close()
 
     def log_event(
         self,
@@ -130,28 +164,19 @@ class PicoLogStore:
     ) -> None:
         """Persist a single event row."""
 
-        self._conn.execute(
-            """
-            INSERT INTO event_log (
-                created_at, run_id, source, event_type, status, mode, target_mode,
-                port, mountpoint, message, details_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                _utc_now(),
-                run_id,
-                source,
-                event_type,
-                status,
-                mode,
-                target_mode,
-                port,
-                mountpoint,
-                message,
-                _json_dumps(details or {}),
-            ),
+        self._event_model.create(
+            created_at=_utc_now(),
+            run_id=run_id,
+            source=source,
+            event_type=event_type,
+            status=status,
+            mode=mode,
+            target_mode=target_mode,
+            port=port,
+            mountpoint=mountpoint,
+            message=message,
+            details_json=_json_dumps(details or {}),
         )
-        self._conn.commit()
 
     def log_snapshot(
         self,
@@ -165,58 +190,41 @@ class PicoLogStore:
     ) -> None:
         """Persist a state snapshot row."""
 
-        self._conn.execute(
-            """
-            INSERT INTO state_snapshot (
-                created_at, run_id, source, mode, port, message, details_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                _utc_now(),
-                run_id,
-                source,
-                mode,
-                port,
-                message,
-                _json_dumps(details or {}),
-            ),
+        self._snapshot_model.create(
+            created_at=_utc_now(),
+            run_id=run_id,
+            source=source,
+            mode=mode,
+            port=port,
+            message=message,
+            details_json=_json_dumps(details or {}),
         )
-        self._conn.commit()
 
     def fetch_events(self, limit: int) -> list[dict[str, Any]]:
         """Return recent event rows as dictionaries."""
 
-        rows = self._conn.execute(
-            """
-            SELECT created_at, run_id, source, event_type, status, mode, target_mode,
-                   port, mountpoint, message, details_json
-            FROM event_log
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-        return [_decode_row(row) for row in rows]
+        query = (
+            self._event_model.select()
+            .order_by(self._event_model.id.desc())
+            .limit(limit)
+        )
+        return [_decode_model(model, EVENT_FIELD_NAMES) for model in query]
 
     def fetch_snapshots(self, limit: int) -> list[dict[str, Any]]:
         """Return recent state snapshot rows as dictionaries."""
 
-        rows = self._conn.execute(
-            """
-            SELECT created_at, run_id, source, mode, port, message, details_json
-            FROM state_snapshot
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-        return [_decode_row(row) for row in rows]
+        query = (
+            self._snapshot_model.select()
+            .order_by(self._snapshot_model.id.desc())
+            .limit(limit)
+        )
+        return [_decode_model(model, SNAPSHOT_FIELD_NAMES) for model in query]
 
 
-def _decode_row(row: sqlite3.Row) -> dict[str, Any]:
-    """Convert a sqlite row to a dict and decode its JSON payload."""
+def _decode_model(model: Model, field_names: tuple[str, ...]) -> dict[str, Any]:
+    """Convert a Peewee model instance to the dict shape used by the CLI."""
 
-    data = dict(row)
+    data = {field_name: getattr(model, field_name) for field_name in field_names}
     data["details"] = json.loads(data.pop("details_json"))
     return data
 

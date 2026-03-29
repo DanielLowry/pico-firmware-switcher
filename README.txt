@@ -20,6 +20,7 @@ Plan (target workflow)
 Repo layout (relevant bits)
 - `uf2s/` — stored UF2 images (MicroPython and the built C++ bootloader).
 - `pico.py` — single host CLI for switching/detecting/flashing.
+- SQLite audit log — defaults to `~/.local/state/pico-firmware-switcher/events.sqlite3`.
 - `requirements.txt` — Python dependencies (`pyserial`, `mpremote`).
 - `py/bootloader_trigger.py` — MicroPython bootloader trigger.
 - `cpp/` — C++ sources and build outputs (including `build/bootloader_trigger.uf2`).
@@ -88,8 +89,27 @@ Usage (single CLI, recommended)
 4) Only install MicroPython helper files
    - `python pico.py install-py-files --port /dev/ttyACM0`
 
-5) If autodetect misses your mode
+5) Record a state snapshot manually
+   - `python pico.py log-state --port /dev/ttyACM0 --source manual`
+   - This appends the current detected state (`py`, `cpp`, `bootsel`, or `unknown`) to the SQLite log.
+
+6) View recent history
+   - `python pico.py history --kind all --limit 20`
+   - Prints recent switch/flash/helper events plus recorded state snapshots from the SQLite log.
+
+7) Install a 5-minute state snapshot timer
+   - `python pico.py install-state-timer --port /dev/ttyACM0 --enable`
+   - This writes `systemd --user` units that call `pico.py log-state` every 5 minutes and enables the timer.
+
+8) If autodetect misses your mode
    - Override explicitly: `--mode py`, `--mode cpp`, or `--mode bootsel`.
+
+Logging and state history
+- Every normal CLI action now records structured events in SQLite, including mode detection, BOOTSEL triggers, UF2 flashes, helper installs, switch skips, and command failures.
+- Default database path: `~/.local/state/pico-firmware-switcher/events.sqlite3`
+- Override the database location with `--db-path /path/to/pico-events.sqlite3` or `PICO_SWITCHER_DB=/path/to/pico-events.sqlite3`.
+- `log-state` is intentionally tolerant: if the Pico is unplugged or detection fails, it still records a snapshot row with mode `unknown`.
+- The generated `systemd --user` service stores absolute paths to the current repo and Python interpreter. If you move the repo or recreate the venv/interpreter, rerun `install-state-timer`.
 
 Usage (manual workflow, legacy scripts)
 1) Flash MicroPython UF2 (from BOOTSEL mode)
