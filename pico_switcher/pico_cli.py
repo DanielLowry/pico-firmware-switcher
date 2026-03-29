@@ -7,6 +7,12 @@ import json
 import sys
 from pathlib import Path
 
+from .pico_backup import (
+    BackupTransferError,
+    backup_database,
+    default_backup_config_path,
+    load_backup_config,
+)
 from .pico_device import (
     DEFAULT_MOUNT_BASE,
     DEFAULT_PORT,
@@ -163,6 +169,18 @@ def build_parser() -> argparse.ArgumentParser:
     history_cmd.add_argument("--limit", type=int, default=DEFAULT_HISTORY_LIMIT, help="Rows to show per section")
     add_db_arg(history_cmd)
 
+    backup_cmd = subparsers.add_parser(
+        "backup-db",
+        help="Create a consistent SQLite backup and send it to the configured remote host",
+    )
+    backup_cmd.add_argument(
+        "--config",
+        default=str(default_backup_config_path()),
+        help=f"Backup config path (default: {default_backup_config_path()})",
+    )
+    add_db_arg(backup_cmd)
+    backup_cmd.add_argument("--verbose", action="store_true")
+
     timer_cmd = subparsers.add_parser(
         "install-state-timer",
         help="Write systemd user units that record the current state every 5 minutes",
@@ -240,6 +258,8 @@ def main() -> int:
             return _run_install_helpers(args, recorder)
         if args.command == "log-state":
             return _run_log_state(args, recorder)
+        if args.command == "backup-db":
+            return _run_backup_db(args, recorder)
         if args.command == "install-state-timer":
             return _run_install_state_timer(args, recorder)
 
@@ -435,6 +455,72 @@ def _run_history(args: argparse.Namespace) -> int:
             _print_history_section("Snapshots", store.fetch_snapshots(limit=args.limit), event_rows=False)
     finally:
         store.close()
+    return 0
+
+
+def _run_backup_db(args: argparse.Namespace, recorder: EventRecorder) -> int:
+    """Handle the manual database backup command."""
+
+    config_path = _expand_path(args.config)
+    db_path = _expand_path(args.db_path)
+    config = load_backup_config(config_path)
+    recorder.event(
+        "backup_requested",
+        message="SQLite backup requested",
+        details={
+            "config_path": str(config_path),
+            "db_path": str(db_path),
+            "remote_host": config.remote.host,
+            "remote_path": config.remote.path,
+        },
+    )
+
+    try:
+        result = backup_database(
+            db_path=db_path,
+            config=config,
+            verbose=args.verbose,
+        )
+    except BackupTransferError as exc:
+        recorder.event(
+            "backup_transfer",
+            status="error",
+            message=str(exc),
+            details={
+                "config_path": str(config_path),
+                "db_path": str(db_path),
+                "staged_path": str(exc.staged_path),
+                "remote_uri": exc.remote_uri,
+            },
+        )
+        raise
+    except Exception as exc:
+        recorder.event(
+            "backup_creation",
+            status="error",
+            message=str(exc),
+            details={
+                "config_path": str(config_path),
+                "db_path": str(db_path),
+            },
+        )
+        raise
+
+    recorder.event(
+        "backup_transfer",
+        message="Transferred SQLite backup to remote host",
+        details={
+            "config_path": str(config_path),
+            "db_path": str(db_path),
+            "file_name": result.file_name,
+            "remote_uri": result.remote_uri,
+            "size_bytes": result.size_bytes,
+            "compressed": result.compressed,
+        },
+    )
+    print(f"backup: {result.file_name}")
+    print(f"remote: {result.remote_uri}")
+    print(f"size: {result.size_bytes}")
     return 0
 
 
