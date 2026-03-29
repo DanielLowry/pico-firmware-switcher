@@ -95,8 +95,9 @@ Usage (single CLI, recommended)
    - This appends the current detected state (`py`, `cpp`, `bootsel`, or `unknown`) to the SQLite log.
 
 6) View recent history
-   - `python pico.py history --kind all --limit 20`
-   - Prints recent switch/flash/helper events plus recorded state snapshots from the SQLite log.
+   - `python pico.py history --kind all`
+   - Prints all switch/flash/helper events plus recorded state snapshots from the SQLite log by default. Use `--limit` only if you want a smaller slice.
+   - Add `--full-details` if you want the raw JSON detail payloads instead of the compact summary output.
 
 7) Install a 1-minute state snapshot timer
    - `python pico.py install-state-timer --port /dev/ttyACM0 --enable`

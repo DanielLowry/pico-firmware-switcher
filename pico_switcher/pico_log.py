@@ -21,7 +21,6 @@ except ImportError as exc:  # pragma: no cover - runtime dependency check
 
 DB_PATH_ENV_VAR = "PICO_SWITCHER_DB"
 DEFAULT_DB_PATH = RUNTIME_ROOT / "events.sqlite3"
-DEFAULT_HISTORY_LIMIT = 20
 DEFAULT_SNAPSHOT_SOURCE = "manual"
 EVENT_FIELD_NAMES = (
     "created_at",
@@ -202,24 +201,20 @@ class PicoLogStore:
             details_json=_json_dumps(details or {}),
         )
 
-    def fetch_events(self, limit: int) -> list[dict[str, Any]]:
+    def fetch_events(self, limit: int | None = None) -> list[dict[str, Any]]:
         """Return recent event rows as dictionaries."""
 
-        query = (
-            self._event_model.select()
-            .order_by(self._event_model.id.desc())
-            .limit(limit)
-        )
+        query = self._event_model.select().order_by(self._event_model.id.desc())
+        if limit is not None:
+            query = query.limit(limit)
         return [_decode_model(model, EVENT_FIELD_NAMES) for model in query]
 
-    def fetch_snapshots(self, limit: int) -> list[dict[str, Any]]:
+    def fetch_snapshots(self, limit: int | None = None) -> list[dict[str, Any]]:
         """Return recent state snapshot rows as dictionaries."""
 
-        query = (
-            self._snapshot_model.select()
-            .order_by(self._snapshot_model.id.desc())
-            .limit(limit)
-        )
+        query = self._snapshot_model.select().order_by(self._snapshot_model.id.desc())
+        if limit is not None:
+            query = query.limit(limit)
         return [_decode_model(model, SNAPSHOT_FIELD_NAMES) for model in query]
 
 

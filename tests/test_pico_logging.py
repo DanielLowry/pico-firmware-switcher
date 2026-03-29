@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import sqlite3
 import tempfile
@@ -17,6 +19,7 @@ from pico_switcher.pico_backup import (
     load_backup_config,
 )
 from pico_switcher import RUNTIME_ROOT
+from pico_switcher.pico_cli import _print_history_section
 from pico_switcher.pico_log import EventRecorder, PicoLogStore, default_db_path
 from pico_switcher.pico_systemd import install_state_timer, render_state_timer
 
@@ -258,6 +261,66 @@ class PicoBackupTests(unittest.TestCase):
                 result = backup_database(db_path=db_path, config=config)
 
             self.assertIn("/home/dan/Drive/Dan's Googly Drive/pico_backups/", result.remote_uri)
+
+
+class PicoCliHistoryTests(unittest.TestCase):
+    def test_history_output_is_compact_by_default(self) -> None:
+        row = {
+            "created_at": "2026-03-29T18:06:09+00:00",
+            "status": "ok",
+            "event_type": "backup_requested",
+            "source": "backup-db",
+            "mode": None,
+            "target_mode": None,
+            "port": None,
+            "mountpoint": None,
+            "message": "SQLite backup requested",
+            "details": {
+                "config_path": str(RUNTIME_ROOT / "backup.toml"),
+                "db_path": str(RUNTIME_ROOT / "events.sqlite3"),
+                "remote_host": "192.168.68.79",
+                "remote_path": "/home/dan/Drive/Dan's Googly Drive/pico_backups",
+            },
+        }
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            _print_history_section("Events", [row], event_rows=True)
+
+        output = buffer.getvalue()
+        self.assertIn("2026-03-29T18:06:09Z", output)
+        self.assertIn("cfg=.pico-switcher/backup.toml", output)
+        self.assertIn("db=.pico-switcher/events.sqlite3", output)
+        self.assertIn("host=192.168.68.79", output)
+        self.assertIn("dest=pico_backups", output)
+        self.assertNotIn("message=SQLite backup requested", output)
+        self.assertNotIn("details={", output)
+        self.assertNotIn("/home/dan/coding_projects/git/pico-firmware-switcher", output)
+
+    def test_history_output_can_show_full_details(self) -> None:
+        row = {
+            "created_at": "2026-03-29T18:06:09+00:00",
+            "status": "ok",
+            "event_type": "backup_requested",
+            "source": "backup-db",
+            "mode": None,
+            "target_mode": None,
+            "port": None,
+            "mountpoint": None,
+            "message": "SQLite backup requested",
+            "details": {
+                "config_path": str(RUNTIME_ROOT / "backup.toml"),
+                "db_path": str(RUNTIME_ROOT / "events.sqlite3"),
+            },
+        }
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            _print_history_section("Events", [row], event_rows=True, full_details=True)
+
+        output = buffer.getvalue()
+        self.assertIn("message=SQLite backup requested", output)
+        self.assertIn('details={"config_path":', output)
 
 
 class PicoSystemdTests(unittest.TestCase):
