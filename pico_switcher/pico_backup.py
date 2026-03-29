@@ -222,6 +222,7 @@ def transfer_backup_artifact(*, artifact_path: Path, remote: BackupRemoteConfig,
         "rsync",
         "-az",
         "--partial",
+        "--protect-args",
         "-e",
         " ".join(shlex.quote(part) for part in ssh_command),
         str(artifact_path),
@@ -240,10 +241,10 @@ def build_remote_uri(remote: BackupRemoteConfig, file_name: str) -> str:
 
 
 def _format_remote_target(*, remote: BackupRemoteConfig, file_name: str) -> str:
-    """Format the remote rsync target with a quoted remote path."""
+    """Format the remote rsync target."""
 
     remote_path = f"{remote.path}/{file_name}"
-    return f"{remote.remote_host}:{shlex.quote(remote_path)}"
+    return f"{remote.remote_host}:{remote_path}"
 
 
 def _sqlite_backup(*, source_path: Path, destination_path: Path) -> None:

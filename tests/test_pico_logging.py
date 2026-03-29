@@ -156,6 +156,7 @@ class PicoBackupTests(unittest.TestCase):
             def fake_run(command: list[str], check: bool) -> None:
                 self.assertTrue(check)
                 self.assertEqual(command[0], "rsync")
+                self.assertIn("--protect-args", command)
                 source_artifact = Path(command[-2])
                 self.assertTrue(source_artifact.exists())
                 self.assertEqual(source_artifact.suffix, ".sqlite3")
@@ -166,7 +167,10 @@ class PicoBackupTests(unittest.TestCase):
                 finally:
                     backup_conn.close()
                 self.assertEqual(row_count, 1)
-                self.assertIn("backuponly@backup-box.local", command[-1])
+                self.assertEqual(
+                    command[-1],
+                    f"backuponly@backup-box.local:/srv/pico/backups/{source_artifact.name}",
+                )
 
             with mock.patch("pico_switcher.pico_backup.subprocess.run", side_effect=fake_run) as run_mock:
                 result = backup_database(db_path=db_path, config=config)
@@ -214,6 +218,46 @@ class PicoBackupTests(unittest.TestCase):
 
             self.assertTrue(ctx.exception.staged_path.exists())
             self.assertEqual(ctx.exception.staged_path.suffix, ".gz")
+
+    def test_backup_database_preserves_remote_paths_with_spaces_and_apostrophes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "events.sqlite3"
+            staging_dir = Path(tmpdir) / "staging"
+            ssh_key_path = Path(tmpdir) / "backup-key"
+            ssh_key_path.write_text("test-key", encoding="utf-8")
+
+            store = PicoLogStore(db_path)
+            store.log_event(
+                run_id="run-1",
+                source="test",
+                event_type="backup_test",
+                status="ok",
+                message="Test row",
+            )
+            store.close()
+
+            config = BackupConfig(
+                staging_dir=staging_dir,
+                compress=True,
+                remote=BackupRemoteConfig(
+                    host="backup-box.local",
+                    user="backuponly",
+                    path="/home/dan/Drive/Dan's Googly Drive/pico_backups",
+                    ssh_key_path=ssh_key_path,
+                ),
+            )
+
+            def fake_run(command: list[str], check: bool) -> None:
+                self.assertTrue(check)
+                self.assertIn("--protect-args", command)
+                self.assertFalse(command[-1].startswith("backuponly@backup-box.local:'"))
+                self.assertNotIn('"\'"\'"', command[-1])
+                self.assertIn("/home/dan/Drive/Dan's Googly Drive/pico_backups/", command[-1])
+
+            with mock.patch("pico_switcher.pico_backup.subprocess.run", side_effect=fake_run):
+                result = backup_database(db_path=db_path, config=config)
+
+            self.assertIn("/home/dan/Drive/Dan's Googly Drive/pico_backups/", result.remote_uri)
 
 
 class PicoSystemdTests(unittest.TestCase):
