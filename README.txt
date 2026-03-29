@@ -98,9 +98,9 @@ Usage (single CLI, recommended)
    - `python pico.py history --kind all --limit 20`
    - Prints recent switch/flash/helper events plus recorded state snapshots from the SQLite log.
 
-7) Install a 5-minute state snapshot timer
+7) Install a 1-minute state snapshot timer
    - `python pico.py install-state-timer --port /dev/ttyACM0 --enable`
-   - This writes `systemd --user` units that call `pico.py log-state` every 5 minutes and enables the timer.
+   - This writes `systemd --user` units that call `pico.py log-state` every minute and enables the timer.
 
 8) Create and send a one-off database backup
    - First create `.pico-switcher/backup.toml` in the repo root:

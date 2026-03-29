@@ -13,7 +13,7 @@ from . import PROJECT_ROOT
 
 DEFAULT_UNIT_DIR = Path("~/.config/systemd/user")
 DEFAULT_SERVICE_NAME = "pico-switcher-state"
-DEFAULT_TIMER_INTERVAL = "5min"
+DEFAULT_TIMER_INTERVAL = "1min"
 
 
 @dataclass(frozen=True)
