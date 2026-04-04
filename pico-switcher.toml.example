@@ -1,0 +1,18 @@
+default_profile = "demo"
+
+[host]
+port = "auto"
+mount_base = "/mnt/pico"
+device_id = "my-pico"
+micropython_uf2 = "uf2s/Pico-MicroPython-20250415-v1.25.0.uf2"
+cpp_uf2 = "uf2s/bootloader_trigger.uf2"
+
+[profiles.demo.python]
+source_dir = "examples/demo_py"
+entry_module = "demo_app"
+entry_function = "main"
+
+[profiles.demo.cpp]
+source_dir = "examples/demo_cpp"
+sources = ["client_app.cpp"]
+output_uf2 = "uf2s/bootloader_trigger.uf2"

@@ -1,5 +1,10 @@
 This project aims to make it possible to switch Raspberry Pi Pico firmware remotely (e.g., over SSH) without pressing the BOOTSEL button. Typical UF2s are a MicroPython firmware image or a C/C++ program. Doing this remotely requires a way to drop into the UF2 bootloader from whatever firmware is currently running.
 
+Current migration docs
+- `docs/profile-deployment-plan.md` — phased migration plan, MVP cut points, and lightweight test strategy
+- `docs/client-contract.md` — current client contract, config/profile shape, and host integration status
+- `pico-switcher.toml.example` — example Phase 1 config file
+
 Current state (early prototype)
 - MicroPython side: `bootloader_trigger.py` (calls `machine.bootloader()`) and `boot.py` (prints `FW:PY` on boot; copy this onto the board).
 - C++ side: `bootloader_trigger` firmware prints `FW:CPP` at startup, then waits for the key sequence `r` then `u` and calls `reset_usb_boot(...)` to enter UF2 mode.

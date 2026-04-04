@@ -1,4 +1,10 @@
-// bootloader_trigger.cpp
+// Prototype C++ firmware used by the current switcher workflow.
+//
+// This program is the repo's existing C++ runtime: it brings up USB serial,
+// prints a known banner for host-side detection, waits for a host command, and
+// enters the UF2 bootloader when requested. Later managed-profile phases will
+// split these responsibilities into a reusable switcher runtime plus a client
+// entrypoint that runs alongside it.
 
 // Include necessary Pico SDK headers
 #include <stdio.h>

@@ -1,4 +1,9 @@
-"""Argument parsing and command dispatch for the Pico switcher CLI."""
+"""Argument parsing and command dispatch for the Pico switcher CLI.
+
+This module defines the user-facing command surface, wires CLI flags into the
+underlying service modules, and keeps top-level command behavior centralized so
+the repo can evolve toward a thinner CLI over reusable core services.
+"""
 
 from __future__ import annotations
 
@@ -30,13 +35,19 @@ from .pico_log import (
     default_db_path,
 )
 from .pico_mpremote import DEFAULT_HELPER_FILES, install_micropython_helpers
+from .pico_profiles import (
+    CONFIG_FILE_NAME,
+    SwitcherConfig,
+    discover_config_path,
+    load_switcher_config,
+    require_profile_target,
+    resolve_profile,
+)
 from .pico_switch import (
     DEFAULT_BOOTSEL_TIMEOUT,
-    DEFAULT_CPP_UF2,
     DEFAULT_DETECT_TIMEOUT,
     DEFAULT_INSTALL_HELPERS,
     DEFAULT_MODE,
-    DEFAULT_PY_UF2,
     DEFAULT_SERIAL_WAIT,
     MIN_POST_SWITCH_DETECT_TIMEOUT,
     detect_mode,
@@ -52,10 +63,15 @@ from .pico_systemd import (
 )
 
 
-def add_common_switch_args(parser: argparse.ArgumentParser) -> None:
+def add_common_switch_args(
+    parser: argparse.ArgumentParser,
+    *,
+    default_port: str,
+    default_mount_base: str,
+) -> None:
     """Register CLI arguments shared by `to-py` and `to-cpp`."""
 
-    parser.add_argument("--port", default=DEFAULT_PORT, help=f"{SERIAL_PORT_HELP} (default: {DEFAULT_PORT})")
+    parser.add_argument("--port", default=default_port, help=f"{SERIAL_PORT_HELP} (default: {default_port})")
     parser.add_argument(
         "--mode",
         default=DEFAULT_MODE,
@@ -64,8 +80,8 @@ def add_common_switch_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--mount-base",
-        default=DEFAULT_MOUNT_BASE,
-        help=f"Mount point to use when RPI-RP2 is not auto-mounted (default: {DEFAULT_MOUNT_BASE})",
+        default=default_mount_base,
+        help=f"Mount point to use when RPI-RP2 is not auto-mounted (default: {default_mount_base})",
     )
     parser.add_argument(
         "--detect-timeout",
@@ -94,6 +110,15 @@ def add_common_switch_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--verbose", action="store_true", help="Show detailed logs")
 
 
+def add_config_arg(parser: argparse.ArgumentParser) -> None:
+    """Register the shared config file option."""
+
+    parser.add_argument(
+        "--config",
+        help=f"Path to {CONFIG_FILE_NAME}; defaults to env or upward search",
+    )
+
+
 def add_db_arg(parser: argparse.ArgumentParser) -> None:
     """Register the common log database path option."""
 
@@ -105,28 +130,41 @@ def add_db_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(config: SwitcherConfig) -> argparse.ArgumentParser:
     """Construct and return the full CLI argument parser."""
+
+    default_port = config.host.port
+    default_mount_base = config.host.mount_base
+    default_py_uf2 = config.host.micropython_uf2
+    default_cpp_uf2 = config.host.cpp_uf2
 
     parser = argparse.ArgumentParser(description="Pico firmware switcher CLI (Linux)")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     detect_cmd = subparsers.add_parser("detect", help="Detect current Pico firmware mode")
-    detect_cmd.add_argument("--port", default=DEFAULT_PORT, help=f"{SERIAL_PORT_HELP} (default: {DEFAULT_PORT})")
+    add_config_arg(detect_cmd)
+    detect_cmd.add_argument("--port", default=default_port, help=f"{SERIAL_PORT_HELP} (default: {default_port})")
     detect_cmd.add_argument("--timeout", type=float, default=DEFAULT_DETECT_TIMEOUT)
     add_db_arg(detect_cmd)
     detect_cmd.add_argument("--verbose", action="store_true")
 
     flash_cmd = subparsers.add_parser("flash", help="Flash a UF2 while Pico is in BOOTSEL mode")
+    add_config_arg(flash_cmd)
     flash_cmd.add_argument("uf2", help="Path to UF2 file")
-    flash_cmd.add_argument("--mount-base", default=DEFAULT_MOUNT_BASE)
+    flash_cmd.add_argument("--mount-base", default=default_mount_base)
     flash_cmd.add_argument("--bootsel-timeout", type=float, default=DEFAULT_BOOTSEL_TIMEOUT)
     add_db_arg(flash_cmd)
     flash_cmd.add_argument("--verbose", action="store_true")
 
     to_py_cmd = subparsers.add_parser("to-py", help="Switch Pico to MicroPython UF2")
-    add_common_switch_args(to_py_cmd)
-    to_py_cmd.add_argument("--uf2", default=str(DEFAULT_PY_UF2), help="MicroPython UF2 path")
+    add_config_arg(to_py_cmd)
+    add_common_switch_args(to_py_cmd, default_port=default_port, default_mount_base=default_mount_base)
+    to_py_cmd.add_argument(
+        "--profile",
+        default=config.default_profile,
+        help=f"Deployment profile name (default: {config.default_profile})",
+    )
+    to_py_cmd.add_argument("--uf2", default=str(default_py_uf2), help="MicroPython UF2 path")
     to_py_cmd.add_argument(
         "--install-helpers",
         action=argparse.BooleanOptionalAction,
@@ -135,14 +173,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     to_cpp_cmd = subparsers.add_parser("to-cpp", help="Switch Pico to C++ UF2")
-    add_common_switch_args(to_cpp_cmd)
-    to_cpp_cmd.add_argument("--uf2", default=str(DEFAULT_CPP_UF2), help="C++ UF2 path")
+    add_config_arg(to_cpp_cmd)
+    add_common_switch_args(to_cpp_cmd, default_port=default_port, default_mount_base=default_mount_base)
+    to_cpp_cmd.add_argument(
+        "--profile",
+        default=config.default_profile,
+        help=f"Deployment profile name (default: {config.default_profile})",
+    )
+    to_cpp_cmd.add_argument("--uf2", default=str(default_cpp_uf2), help="C++ UF2 path")
 
     install_cmd = subparsers.add_parser(
         "install-py-files",
         help="Copy py/boot.py and py/bootloader_trigger.py to a MicroPython Pico",
     )
-    install_cmd.add_argument("--port", default=DEFAULT_PORT, help=f"{SERIAL_PORT_HELP} (default: {DEFAULT_PORT})")
+    add_config_arg(install_cmd)
+    install_cmd.add_argument("--port", default=default_port, help=f"{SERIAL_PORT_HELP} (default: {default_port})")
     add_db_arg(install_cmd)
     install_cmd.add_argument("--verbose", action="store_true")
 
@@ -150,7 +195,8 @@ def build_parser() -> argparse.ArgumentParser:
         "log-state",
         help="Detect the current state and append a snapshot row to the SQLite log",
     )
-    log_state_cmd.add_argument("--port", default=DEFAULT_PORT, help=f"{SERIAL_PORT_HELP} (default: {DEFAULT_PORT})")
+    add_config_arg(log_state_cmd)
+    log_state_cmd.add_argument("--port", default=default_port, help=f"{SERIAL_PORT_HELP} (default: {default_port})")
     log_state_cmd.add_argument("--timeout", type=float, default=DEFAULT_DETECT_TIMEOUT)
     log_state_cmd.add_argument(
         "--source",
@@ -191,7 +237,8 @@ def build_parser() -> argparse.ArgumentParser:
         "install-state-timer",
         help="Write systemd user units that record the current state every minute",
     )
-    timer_cmd.add_argument("--port", default=DEFAULT_PORT, help=f"{SERIAL_PORT_HELP} (default: {DEFAULT_PORT})")
+    add_config_arg(timer_cmd)
+    timer_cmd.add_argument("--port", default=default_port, help=f"{SERIAL_PORT_HELP} (default: {default_port})")
     timer_cmd.add_argument("--timeout", type=float, default=DEFAULT_DETECT_TIMEOUT)
     timer_cmd.add_argument(
         "--interval",
@@ -222,8 +269,14 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     """Run the firmware switcher CLI and return a process exit code."""
 
-    parser = build_parser()
-    args = parser.parse_args()
+    argv = sys.argv[1:]
+    explicit_config_path = _extract_switcher_config_value(argv)
+    switcher_config = load_switcher_config(
+        discover_config_path(explicit_path=explicit_config_path),
+    )
+    parser = build_parser(switcher_config)
+    args = parser.parse_args(argv)
+    setattr(args, "switcher_config", switcher_config)
     recorder: EventRecorder | None = None
 
     try:
@@ -359,6 +412,9 @@ def _run_switch(
     recorder: EventRecorder,
 ) -> bool:
     """Invoke the common switch workflow used by `to-py` and `to-cpp`."""
+
+    profile = resolve_profile(args.switcher_config, getattr(args, "profile", None))
+    require_profile_target(profile, target)
 
     return switch_firmware(
         target=target,
@@ -832,3 +888,42 @@ def _expand_path(path_value: str) -> Path:
     """Expand a user-provided path string to a filesystem path."""
 
     return Path(path_value).expanduser()
+
+
+def _extract_cli_option_value(argv: list[str], option_name: str) -> str | None:
+    """Extract one option value from raw argv without fully parsing the CLI."""
+
+    for index, item in enumerate(argv):
+        if item == option_name:
+            if index + 1 < len(argv):
+                return argv[index + 1]
+            return None
+        if item.startswith(f"{option_name}="):
+            return item.split("=", 1)[1]
+    return None
+
+
+def _extract_switcher_config_value(argv: list[str]) -> str | None:
+    """Extract `--config` only for commands that use it as switcher config."""
+
+    command = _extract_subcommand(argv)
+    if command not in {
+        "detect",
+        "flash",
+        "to-py",
+        "to-cpp",
+        "install-py-files",
+        "log-state",
+        "install-state-timer",
+    }:
+        return None
+    return _extract_cli_option_value(argv, "--config")
+
+
+def _extract_subcommand(argv: list[str]) -> str | None:
+    """Return the CLI subcommand from raw argv."""
+
+    for item in argv:
+        if not item.startswith("-"):
+            return item
+    return None

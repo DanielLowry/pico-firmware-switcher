@@ -1,4 +1,9 @@
-"""mpremote command helpers for interacting with MicroPython."""
+"""Helpers for host-side interaction with MicroPython via `mpremote`.
+
+This module is the narrow integration point between the switcher and the
+MicroPython tooling on the host: probing a device, invoking bootloader entry,
+and copying switcher-owned files to the Pico filesystem.
+"""
 
 from __future__ import annotations
 

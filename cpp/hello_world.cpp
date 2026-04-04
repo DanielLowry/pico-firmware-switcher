@@ -1,3 +1,9 @@
+// Minimal Pico SDK example kept in the repo as a simple build sanity target.
+//
+// This file is not part of the switcher runtime itself. It exists as a tiny
+// standalone executable that helps confirm the Pico SDK toolchain can build a
+// basic program in this repository.
+
 #include <stdio.h>
 #include "pico/stdlib.h"
 

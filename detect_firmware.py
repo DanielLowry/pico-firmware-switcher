@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Quickly report whether the Pico is running MicroPython or the C++ firmware
-by reading the startup banner over serial. Requires `pyserial`.
+Legacy standalone banner probe for quickly identifying the active Pico runtime.
+
+This script predates the package CLI and provides a minimal way to inspect a
+serial-connected Pico by reading its startup banner and classifying it as the
+prototype MicroPython or C++ firmware.
 """
 
 import sys

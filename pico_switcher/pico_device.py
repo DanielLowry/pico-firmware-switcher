@@ -1,4 +1,9 @@
-"""Device I/O helpers for Pico mass-storage and serial interactions."""
+"""Device discovery and low-level Pico I/O helpers.
+
+This module handles host-side interaction with the physical Pico device:
+discovering serial ports, locating the BOOTSEL mass-storage device, reading
+serial banners, and sending the low-level bytes needed by the current runtime.
+"""
 
 from __future__ import annotations
 

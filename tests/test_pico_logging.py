@@ -1,3 +1,10 @@
+"""Unit tests for logging, backup, and timer helpers.
+
+These tests focus on lightweight host-side behavior that can be validated
+without hardware: SQLite logging, config parsing, backup command construction,
+and generated `systemd` unit content.
+"""
+
 from __future__ import annotations
 
 import contextlib

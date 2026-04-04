@@ -1,4 +1,9 @@
-"""Backup helpers for the Pico switcher SQLite log database."""
+"""Backup creation and transfer helpers for switcher runtime state.
+
+This module owns the lightweight backup workflow for the local SQLite event
+database: parse a small TOML config, create a consistent snapshot, optionally
+compress it, and hand it off to `rsync` over SSH.
+"""
 
 from __future__ import annotations
 

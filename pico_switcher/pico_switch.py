@@ -1,4 +1,9 @@
-"""Firmware switching workflow for the Pico switcher CLI."""
+"""High-level firmware switching workflow used by the CLI.
+
+This module coordinates detection, BOOTSEL entry, UF2 flashing, and optional
+MicroPython helper installation. It sits above low-level device and `mpremote`
+helpers and below the CLI command layer.
+"""
 
 from __future__ import annotations
 

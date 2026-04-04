@@ -1,4 +1,9 @@
-"""Peewee-backed SQLite event and state logging for Pico switcher operations."""
+"""SQLite-backed event and snapshot logging for switcher operations.
+
+This module encapsulates the optional persistence layer used by the CLI. It
+defines the database schema, the small recorder abstraction used by commands,
+and the formatting-friendly row shapes consumed by history and backup logic.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,9 @@
-"""Helpers for generating and installing a periodic state snapshot timer."""
+"""Helpers for periodic state logging via `systemd --user`.
+
+This module renders and installs a small timer/service pair that calls back into
+the switcher CLI on a schedule, allowing lightweight unattended state snapshots
+without embedding any long-running daemon logic in the project itself.
+"""
 
 from __future__ import annotations
 

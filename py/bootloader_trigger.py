@@ -1,4 +1,9 @@
-# This script is designed to reboot the Raspberry Pi Pico into bootloader mode.
+"""Prototype MicroPython helper that enters BOOTSEL from the device runtime.
+
+The current switch flow can import this helper over `mpremote` to request UF2
+bootloader mode from a running MicroPython image. Later phases plan to replace
+this client-visible helper with a host-driven `mpremote bootloader` action.
+"""
 
 try:
     import machine, time
