@@ -1,8 +1,9 @@
 """Profile discovery, parsing, and validation for profile-based deployment.
 
-This module owns the Phase 1 configuration model: locating `pico-switcher.toml`,
-loading host defaults and named client profiles, validating the Python and C++
-contracts, and providing the built-in demo profile used during migration.
+This module owns the shared configuration model used by the profile-driven
+switcher: locate `pico-switcher.toml`, load host defaults and named client
+profiles, validate the Python and C++ contracts, and provide the built-in demo
+profile used during migration.
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
-"""Prototype MicroPython helper that enters BOOTSEL from the device runtime.
+"""Legacy MicroPython helper that enters BOOTSEL from the device runtime.
 
-The current switch flow can import this helper over `mpremote` to request UF2
-bootloader mode from a running MicroPython image. Later phases plan to replace
-this client-visible helper with a host-driven `mpremote bootloader` action.
+The supported host path now uses `mpremote bootloader` directly instead of
+importing this helper on the device. This file remains as a reference for the
+older prototype flow and for any remaining legacy shell helpers.
 """
 
 try:

@@ -104,7 +104,7 @@ def trigger_from_py(port: str, verbose: bool) -> Optional[str]:
         print("Triggering BOOTSEL from MicroPython...")
     resolved_port = resolve_serial_port(port=port, verbose=verbose)
     result = run_mpremote(
-        ["connect", resolved_port, "exec", "import bootloader_trigger"],
+        ["connect", resolved_port, "bootloader"],
         quiet=not verbose,
         allow_error=True,
     )
@@ -113,7 +113,7 @@ def trigger_from_py(port: str, verbose: bool) -> Optional[str]:
     err = _format_mpremote_error(result)
     if verbose and err:
         print(f"mpremote trigger warning: {err}")
-    return err or "mpremote failed to run bootloader_trigger"
+    return err or "mpremote failed to enter bootloader"
 
 
 def install_micropython_helpers(

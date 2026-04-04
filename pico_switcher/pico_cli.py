@@ -26,6 +26,7 @@ from .pico_device import (
     SERIAL_PORT_HELP,
     copy_uf2,
     wait_for_bootsel_mount,
+    wait_for_serial_port,
 )
 from .pico_log import (
     DEFAULT_SNAPSHOT_SOURCE,
@@ -34,9 +35,16 @@ from .pico_log import (
     create_event_recorder,
     default_db_path,
 )
-from .pico_mpremote import DEFAULT_HELPER_FILES, install_micropython_helpers
+from .pico_micropython import (
+    MANAGED_BOOT_FILE_NAME,
+    MANAGED_MAIN_FILE_NAME,
+    MANAGED_METADATA_FILE_NAME,
+    build_managed_python_sync_plan,
+    sync_managed_python_profile,
+)
 from .pico_profiles import (
     CONFIG_FILE_NAME,
+    Profile,
     SwitcherConfig,
     discover_config_path,
     load_switcher_config,
@@ -46,7 +54,6 @@ from .pico_profiles import (
 from .pico_switch import (
     DEFAULT_BOOTSEL_TIMEOUT,
     DEFAULT_DETECT_TIMEOUT,
-    DEFAULT_INSTALL_HELPERS,
     DEFAULT_MODE,
     DEFAULT_SERIAL_WAIT,
     MIN_POST_SWITCH_DETECT_TIMEOUT,
@@ -119,6 +126,27 @@ def add_config_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_profile_arg(parser: argparse.ArgumentParser, config: SwitcherConfig) -> None:
+    """Register the common deployment profile option."""
+
+    parser.add_argument(
+        "--profile",
+        default=config.default_profile,
+        help=f"Deployment profile name (default: {config.default_profile})",
+    )
+
+
+def add_serial_wait_arg(parser: argparse.ArgumentParser) -> None:
+    """Register the serial wait option used by sync and post-flash flows."""
+
+    parser.add_argument(
+        "--serial-wait",
+        type=float,
+        default=DEFAULT_SERIAL_WAIT,
+        help="Seconds to wait for serial port access",
+    )
+
+
 def add_db_arg(parser: argparse.ArgumentParser) -> None:
     """Register the common log database path option."""
 
@@ -159,35 +187,40 @@ def build_parser(config: SwitcherConfig) -> argparse.ArgumentParser:
     to_py_cmd = subparsers.add_parser("to-py", help="Switch Pico to MicroPython UF2")
     add_config_arg(to_py_cmd)
     add_common_switch_args(to_py_cmd, default_port=default_port, default_mount_base=default_mount_base)
-    to_py_cmd.add_argument(
-        "--profile",
-        default=config.default_profile,
-        help=f"Deployment profile name (default: {config.default_profile})",
-    )
+    add_profile_arg(to_py_cmd, config)
     to_py_cmd.add_argument("--uf2", default=str(default_py_uf2), help="MicroPython UF2 path")
     to_py_cmd.add_argument(
         "--install-helpers",
         action=argparse.BooleanOptionalAction,
-        default=DEFAULT_INSTALL_HELPERS,
-        help="Install py/boot.py and py/bootloader_trigger.py after flashing",
+        default=True,
+        help=argparse.SUPPRESS,
     )
+
+    sync_py_cmd = subparsers.add_parser(
+        "sync-py",
+        help="Sync switcher-owned MicroPython files and the selected client app",
+    )
+    add_config_arg(sync_py_cmd)
+    sync_py_cmd.add_argument("--port", default=default_port, help=f"{SERIAL_PORT_HELP} (default: {default_port})")
+    add_serial_wait_arg(sync_py_cmd)
+    add_profile_arg(sync_py_cmd, config)
+    add_db_arg(sync_py_cmd)
+    sync_py_cmd.add_argument("--verbose", action="store_true")
 
     to_cpp_cmd = subparsers.add_parser("to-cpp", help="Switch Pico to C++ UF2")
     add_config_arg(to_cpp_cmd)
     add_common_switch_args(to_cpp_cmd, default_port=default_port, default_mount_base=default_mount_base)
-    to_cpp_cmd.add_argument(
-        "--profile",
-        default=config.default_profile,
-        help=f"Deployment profile name (default: {config.default_profile})",
-    )
+    add_profile_arg(to_cpp_cmd, config)
     to_cpp_cmd.add_argument("--uf2", default=str(default_cpp_uf2), help="C++ UF2 path")
 
     install_cmd = subparsers.add_parser(
         "install-py-files",
-        help="Copy py/boot.py and py/bootloader_trigger.py to a MicroPython Pico",
+        help="Legacy alias for sync-py",
     )
     add_config_arg(install_cmd)
     install_cmd.add_argument("--port", default=default_port, help=f"{SERIAL_PORT_HELP} (default: {default_port})")
+    add_serial_wait_arg(install_cmd)
+    add_profile_arg(install_cmd, config)
     add_db_arg(install_cmd)
     install_cmd.add_argument("--verbose", action="store_true")
 
@@ -290,8 +323,10 @@ def main() -> int:
         if args.command == "flash":
             return _run_flash(args, recorder)
         if args.command == "to-py":
-            flashed = _run_switch(args=args, target="py", install_helpers=args.install_helpers, recorder=recorder)
+            flashed = _run_switch(args=args, target="py", install_helpers=False, recorder=recorder)
             _print_switch_result(target="py", flashed=flashed)
+            _run_sync_py(args, recorder, reason="post_switch")
+            _print_py_sync_result(args.profile)
             detect_timeout = max(args.detect_timeout, MIN_POST_SWITCH_DETECT_TIMEOUT)
             mode = detect_mode_safe(
                 port=args.port,
@@ -309,12 +344,18 @@ def main() -> int:
             )
             print(f"detect: {mode or 'unknown'}")
             return 0
+        if args.command == "sync-py":
+            _run_sync_py(args, recorder, reason="cli_sync")
+            _print_py_sync_result(args.profile)
+            return 0
         if args.command == "to-cpp":
             flashed = _run_switch(args=args, target="cpp", install_helpers=False, recorder=recorder)
             _print_switch_result(target="cpp", flashed=flashed)
             return 0
         if args.command == "install-py-files":
-            return _run_install_helpers(args, recorder)
+            _run_sync_py(args, recorder, reason="legacy_install")
+            _print_py_sync_result(args.profile)
+            return 0
         if args.command == "log-state":
             return _run_log_state(args, recorder)
         if args.command == "backup-db":
@@ -433,36 +474,69 @@ def _run_switch(
     )
 
 
-def _run_install_helpers(args: argparse.Namespace, recorder: EventRecorder) -> int:
-    """Handle the explicit helper file install command."""
+def _run_sync_py(args: argparse.Namespace, recorder: EventRecorder, *, reason: str) -> None:
+    """Sync managed MicroPython runtime files and the selected client app."""
+
+    profile = _resolve_profile_for_target(args, "py")
+    assert profile.python is not None  # covered by _resolve_profile_for_target
+    plan = build_managed_python_sync_plan(profile.name, profile.python)
 
     recorder.event(
-        "helpers_install_requested",
+        "py_sync_requested",
         port=args.port,
-        message="MicroPython helper file install requested",
-        details={"helper_files": [str(file_path) for file_path in DEFAULT_HELPER_FILES]},
+        message="Managed MicroPython sync requested",
+        details={
+            "reason": reason,
+            "profile": profile.name,
+            "source_dir": str(plan.source_dir),
+            "entry_module": plan.entry_module,
+            "entry_function": plan.entry_function,
+        },
     )
     try:
-        install_micropython_helpers(
-            port=args.port,
+        resolved_port = wait_for_serial_port(port=args.port, timeout=args.serial_wait, verbose=args.verbose)
+        sync_managed_python_profile(
+            port=resolved_port,
+            plan=plan,
             verbose=args.verbose,
         )
     except Exception as exc:
         recorder.event(
-            "helpers_install",
+            "py_sync",
             status="error",
             port=args.port,
             message=str(exc),
-            details={"helper_files": [str(file_path) for file_path in DEFAULT_HELPER_FILES]},
+            details={
+                "reason": reason,
+                "profile": profile.name,
+                "source_dir": str(plan.source_dir),
+                "entry_module": plan.entry_module,
+                "entry_function": plan.entry_function,
+                "runtime_files": [
+                    MANAGED_BOOT_FILE_NAME,
+                    MANAGED_MAIN_FILE_NAME,
+                    MANAGED_METADATA_FILE_NAME,
+                ],
+            },
         )
         raise
     recorder.event(
-        "helpers_install",
-        port=args.port,
-        message="Installed MicroPython helper files",
-        details={"helper_files": [str(file_path) for file_path in DEFAULT_HELPER_FILES]},
+        "py_sync",
+        port=resolved_port,
+        message="Synced managed MicroPython files",
+        details={
+            "reason": reason,
+            "profile": profile.name,
+            "source_dir": str(plan.source_dir),
+            "entry_module": plan.entry_module,
+            "entry_function": plan.entry_function,
+            "runtime_files": [
+                MANAGED_BOOT_FILE_NAME,
+                MANAGED_MAIN_FILE_NAME,
+                MANAGED_METADATA_FILE_NAME,
+            ],
+        },
     )
-    return 0
 
 
 def _run_log_state(args: argparse.Namespace, recorder: EventRecorder) -> int:
@@ -708,17 +782,22 @@ _DETAIL_LABELS = {
     "helper_files": "files",
     "interval": "every",
     "mount_base": "base",
+    "entry_function": "entry_fn",
+    "entry_module": "entry_mod",
     "reason": "reason",
+    "profile": "profile",
     "remote_host": "host",
     "remote_path": "dest",
     "remote_uri": "remote",
     "requested_port": "req",
     "service_name": "service",
     "size_bytes": "size",
+    "source_dir": "src",
     "staged_path": "staged",
     "status": "status",
     "uf2_path": "uf2",
     "unit_dir": "units",
+    "runtime_files": "runtime",
 }
 
 _DETAIL_PRIORITY = {
@@ -733,13 +812,18 @@ _DETAIL_PRIORITY = {
     "interval": 8,
     "uf2_path": 9,
     "helper_files": 10,
-    "reason": 11,
-    "status": 12,
-    "requested_port": 13,
-    "force_flash": 14,
-    "command": 15,
-    "unit_dir": 16,
-    "mount_base": 17,
+    "profile": 11,
+    "source_dir": 12,
+    "entry_module": 13,
+    "entry_function": 14,
+    "runtime_files": 15,
+    "reason": 16,
+    "status": 17,
+    "requested_port": 18,
+    "force_flash": 19,
+    "command": 20,
+    "unit_dir": 21,
+    "mount_base": 22,
 }
 
 
@@ -884,6 +968,12 @@ def _print_switch_result(target: str, flashed: bool) -> None:
     print("Switched to C++ UF2." if flashed else "Already in C++ mode; skipped UF2 flash.")
 
 
+def _print_py_sync_result(profile_name: str) -> None:
+    """Print the post-sync status line shown to CLI users."""
+
+    print(f"Synced managed MicroPython profile: {profile_name}")
+
+
 def _expand_path(path_value: str) -> Path:
     """Expand a user-provided path string to a filesystem path."""
 
@@ -911,6 +1001,7 @@ def _extract_switcher_config_value(argv: list[str]) -> str | None:
         "detect",
         "flash",
         "to-py",
+        "sync-py",
         "to-cpp",
         "install-py-files",
         "log-state",
@@ -927,3 +1018,11 @@ def _extract_subcommand(argv: list[str]) -> str | None:
         if not item.startswith("-"):
             return item
     return None
+
+
+def _resolve_profile_for_target(args: argparse.Namespace, target: str) -> Profile:
+    """Resolve and validate the selected profile for the requested target."""
+
+    profile = resolve_profile(args.switcher_config, getattr(args, "profile", None))
+    require_profile_target(profile, target)
+    return profile

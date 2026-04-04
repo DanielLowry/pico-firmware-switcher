@@ -1,8 +1,8 @@
-"""Switcher-owned MicroPython boot hook used by the prototype runtime.
+"""Static switcher-owned `boot.py` template for managed MicroPython.
 
-This file is copied to the Pico so the host can identify a MicroPython runtime
-from a stable startup banner. Later managed-profile phases will expand this
-switcher-owned root file role rather than handing it to client code.
+This file stays fixed in the repo and is copied to the Pico device root by the
+managed MicroPython sync flow. Its job is intentionally small: emit a stable
+banner so the host can identify a MicroPython runtime during startup.
 """
 
 import time

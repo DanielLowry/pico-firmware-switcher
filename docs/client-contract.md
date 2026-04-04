@@ -2,24 +2,35 @@
 
 ## Executive Summary
 
-- Phase 1 is CLI-first. Clients should use `pico.py` with `--profile`; a supported importable host API is planned later.
+- The current integration path is still CLI-first. Clients should use `pico.py` with `--profile`; a supported importable host API is planned later.
 - Config lives in `pico-switcher.toml`. The switcher loads a default profile plus any named client profiles.
 - Python profiles declare a source directory and entrypoint shape. They must not ship switcher-owned root files such as `boot.py` or `main.py`.
 - C++ profiles declare a source directory, source list, and output UF2 path.
-- The later managed runtime will keep switching under switcher ownership while client code plugs into that runtime.
+- Managed MicroPython deployment is now switcher-owned: the switcher syncs root runtime files plus the client app under `/app`.
+- The later managed C++ runtime will keep switching under switcher ownership while client code plugs into that runtime.
 
-## Phase 1 Status
+## Current Status
 
-Phase 1 adds config discovery, profile loading, and profile validation. It does not yet add managed Python sync or the managed C++ runtime.
+Implemented now:
+
+- config discovery and profile validation
+- `to-py --profile ...` for switch-then-sync MicroPython deployment
+- `sync-py --profile ...` for syncing managed MicroPython files without switching
+
+Not implemented yet:
+
+- supported importable host API
+- managed C++ runtime and build contract
 
 Examples:
 
 ```bash
 python pico.py to-py --config pico-switcher.toml --profile demo
+python pico.py sync-py --config pico-switcher.toml --profile demo
 python pico.py to-cpp --config pico-switcher.toml --profile demo
 ```
 
-A supported importable host API is planned, but it is not part of the Phase 1 contract. Until that API exists, direct imports of internal modules should be treated as unstable implementation details.
+A supported importable host API is planned, but it is not part of the current contract. Until that API exists, direct imports of internal modules should be treated as unstable implementation details.
 
 ## Config Contract
 
@@ -78,13 +89,27 @@ output_uf2 = "build/my_app.uf2"
 
 ## Target Managed Runtime Contract
 
+Here, "managed runtime structure" means the switcher controls the startup files
+and overall on-device layout, while the client code lives in a dedicated
+application area.
+
 ### Managed MicroPython contract
 
-- the switcher owns root `boot.py`
-- the switcher owns root `main.py`
+- the switcher owns static root `boot.py`
+- the switcher owns static root `main.py`
 - the switcher owns generated metadata at root
 - client files are mirrored under `/app`
 - the switcher calls `app.<entry_module>.<entry_function>()`
+
+In other words, the managed runtime structure on the Pico is:
+
+- device root: switcher-owned startup/runtime files
+- `/app`: client-owned code and assets
+
+Status:
+
+- implemented in the host-side sync flow
+- detect still reports only `py` vs `cpp` for now; profile-aware detect is a later phase
 
 ### Managed C++ contract
 

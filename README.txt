@@ -5,29 +5,29 @@ Current migration docs
 - `docs/client-contract.md` — current client contract, config/profile shape, and host integration status
 - `pico-switcher.toml.example` — example Phase 1 config file
 
-Current state (early prototype)
-- MicroPython side: `bootloader_trigger.py` (calls `machine.bootloader()`) and `boot.py` (prints `FW:PY` on boot; copy this onto the board).
-- C++ side: `bootloader_trigger` firmware prints `FW:CPP` at startup, then waits for the key sequence `r` then `u` and calls `reset_usb_boot(...)` to enter UF2 mode.
-- Python CLI is now available as `pico.py` (`detect`, `to-py`, `to-cpp`, `flash`, `install-py-files`).
+Current state
+- MicroPython side: the host now syncs switcher-owned root files plus the selected client app to a managed `/app` layout on the Pico.
+- C++ side: `bootloader_trigger` firmware prints `FW:CPP` at startup, then waits for a single `'b'` command and calls `reset_usb_boot(...)` to enter UF2 mode.
+- Python CLI is now available as `pico.py` (`detect`, `to-py`, `sync-py`, `to-cpp`, `flash`, `install-py-files`).
 - Existing shell scripts still work, but they are now legacy helpers.
 
 Plan (target workflow)
 - Add a small Python CLI (`pico.py`) with `to-py` and `to-cpp` commands.
 - Detect current firmware by reading the boot banner (`FW:PY` / `FW:CPP`) over serial.
 - Trigger UF2 mode remotely:
-  - MicroPython: run `bootloader_trigger.py` via `mpremote`.
+  - MicroPython: use `mpremote ... bootloader`.
   - C++: send a single `'b'` over serial to drop into UF2 mode.
 - Wait for the `RPI-RP2` mount and copy the requested UF2.
-- Optional flags:
-  - `--sync` to copy MicroPython project files after switching to MicroPython.
-  - `--build` to rebuild the C++ UF2 before flashing.
+- Additional commands:
+  - `sync-py` to sync the managed MicroPython files without switching.
+  - later `build-cpp` support for per-profile C++ builds.
 
 Repo layout (relevant bits)
 - `uf2s/` — stored UF2 images (MicroPython and the built C++ bootloader).
 - `pico.py` — single host CLI for switching/detecting/flashing.
 - SQLite audit log — defaults to `.pico-switcher/events.sqlite3` in the repo root.
 - `requirements.txt` — Python dependencies (`pyserial`, `mpremote`, `peewee`, and `tomli` on Python < 3.11).
-- `py/bootloader_trigger.py` — MicroPython bootloader trigger.
+- `py/bootloader_trigger.py` — legacy MicroPython bootloader helper retained for the older flow.
 - `cpp/` — C++ sources and build outputs (including `build/bootloader_trigger.uf2`).
 - `shell/` — helper scripts for flashing and triggering.
 
@@ -80,8 +80,8 @@ Common CMake errors and fixes
 
 Usage (single CLI, recommended)
 1) Switch to MicroPython
-   - `python pico.py to-py --port /dev/ttyACM0 --verbose`
-   - This detects mode, triggers BOOTSEL, mounts `RPI-RP2` if needed, flashes the MicroPython UF2, then installs `py/boot.py` + `py/bootloader_trigger.py`.
+   - `python pico.py to-py --port /dev/ttyACM0 --profile demo --verbose`
+   - This detects mode, triggers BOOTSEL, mounts `RPI-RP2` if needed, flashes the MicroPython UF2, then syncs switcher-owned runtime files plus the selected client app under `/app`.
    - If already in MicroPython mode, UF2 flashing is skipped by default (use `--force-flash` to override).
 
 2) Switch to C++
@@ -92,23 +92,28 @@ Usage (single CLI, recommended)
 3) Flash any UF2 while already in BOOTSEL
    - `python pico.py flash /path/to/file.uf2 --verbose`
 
-4) Only install MicroPython helper files
-   - `python pico.py install-py-files --port /dev/ttyACM0`
+4) Sync managed MicroPython files without switching
+   - `python pico.py sync-py --port /dev/ttyACM0 --profile demo`
+   - This waits for a MicroPython serial port, replaces `/app`, copies switcher-owned `boot.py` and `main.py`, and writes generated profile metadata.
 
-5) Record a state snapshot manually
+5) Legacy alias for managed MicroPython sync
+   - `python pico.py install-py-files --port /dev/ttyACM0 --profile demo`
+   - This now behaves as a compatibility alias for `sync-py`.
+
+6) Record a state snapshot manually
    - `python pico.py log-state --port /dev/ttyACM0 --source manual`
    - This appends the current detected state (`py`, `cpp`, `bootsel`, or `unknown`) to the SQLite log.
 
-6) View recent history
+7) View recent history
    - `python pico.py history --kind all`
    - Prints all switch/flash/helper events plus recorded state snapshots from the SQLite log by default. Use `--limit` only if you want a smaller slice.
    - Add `--full-details` if you want the raw JSON detail payloads instead of the compact summary output.
 
-7) Install a 1-minute state snapshot timer
+8) Install a 1-minute state snapshot timer
    - `python pico.py install-state-timer --port /dev/ttyACM0 --enable`
    - This writes `systemd --user` units that call `pico.py log-state` every minute and enables the timer.
 
-8) Create and send a one-off database backup
+9) Create and send a one-off database backup
    - First create `.pico-switcher/backup.toml` in the repo root:
      ```
      [local]
@@ -126,7 +131,7 @@ Usage (single CLI, recommended)
    - Then run: `python pico.py backup-db`
    - This creates a consistent snapshot of the SQLite log database, transfers it to the configured remote host with `rsync` over SSH, and deletes the local staged copy after a successful transfer.
 
-9) If autodetect misses your mode
+10) If autodetect misses your mode
    - Override explicitly: `--mode py`, `--mode cpp`, or `--mode bootsel`.
 
 Logging and state history
@@ -154,12 +159,12 @@ Usage (manual workflow, legacy scripts)
 
 2) Install MicroPython helper files (once per MicroPython flash)
    - Run: `./shell/install_micropython_files.sh /dev/ttyACM0`
-   - This copies `py/boot.py` and `py/bootloader_trigger.py` onto the Pico filesystem.
+- This older helper workflow is now superseded by the managed `sync-py` path.
 
 3) Drop to UF2 bootloader from MicroPython (remote)
    - Ensure the Pico is running MicroPython and expose the serial port (e.g., `/dev/ttyACM0`).
    - Run: `./shell/trigger_py_boot.sh /dev/ttyACM0 true`
-   - This uses `mpremote` to execute `bootloader_trigger.py`, which reboots the board into UF2 mode (the `RPI-RP2` drive should appear).
+- The current host path now prefers `mpremote ... bootloader` instead of importing `bootloader_trigger.py` on the device.
 
 4) Flash the C++ bootloader trigger UF2
    - With the board now in UF2 mode, run: `./shell/load_cpp_bootloader_uf2.sh`
@@ -167,7 +172,7 @@ Usage (manual workflow, legacy scripts)
 
 5) Use the C++ bootloader trigger
    - Connect to the Pico over serial (e.g., `screen /dev/ttyACM0 115200`).
-   - Press `r` then `u` to reboot into UF2 mode. From there, you can copy another UF2 to `RPI-RP2` (e.g., via `./shell/load_uf2.sh <filename.uf2>`).
+   - Press `b` to reboot into UF2 mode. From there, you can copy another UF2 to `RPI-RP2` (e.g., via `./shell/load_uf2.sh <filename.uf2>`).
 
 Next steps (priority order)
 - Change the C++ trigger to a single `'b'` command (still print `FW:CPP` on boot).
@@ -175,4 +180,4 @@ Next steps (priority order)
 - Add a minimal config file (serial port, mount point, UF2 paths) to avoid hardcoding.
 
 Notes
-- MicroPython itself ships as a UF2 (already in `uf2s/`); your Python files (`boot.py`, `bootloader_trigger.py`, later your app) are copied directly onto the MicroPython filesystem, not built into a UF2.
+- MicroPython itself ships as a UF2 (already in `uf2s/`); the host syncs switcher-owned runtime files and the selected client app directly onto the MicroPython filesystem rather than building them into a UF2.
