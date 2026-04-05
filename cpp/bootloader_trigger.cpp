@@ -1,10 +1,9 @@
-// Prototype C++ firmware used by the current switcher workflow.
+// Legacy prototype C++ firmware from the pre-profile switcher workflow.
 //
-// This program is the repo's existing C++ runtime: it brings up USB serial,
-// prints a known banner for host-side detection, waits for a host command, and
-// enters the UF2 bootloader when requested. Later managed-profile phases will
-// split these responsibilities into a reusable switcher runtime plus a client
-// entrypoint that runs alongside it.
+// The managed Phase 3 runtime now lives in `managed_runtime.cpp` and expects a
+// client-defined `client_app_main()` entrypoint via `switcher_client.h`. This
+// older file is retained as a compact reference for the original single-file
+// prototype that owned everything directly in one binary.
 
 // Include necessary Pico SDK headers
 #include <stdio.h>

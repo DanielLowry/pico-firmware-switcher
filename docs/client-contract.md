@@ -6,8 +6,10 @@
 - Config lives in `pico-switcher.toml`. The switcher loads a default profile plus any named client profiles.
 - Python profiles declare a source directory and entrypoint shape. They must not ship switcher-owned root files such as `boot.py` or `main.py`.
 - C++ profiles declare a source directory, source list, and output UF2 path.
+- Managed C++ clients should include `cpp/switcher_client.h` and define exactly one entrypoint:
+  `extern "C" void client_app_main(void);`
 - Managed MicroPython deployment is now switcher-owned: the switcher syncs root runtime files plus the client app under `/app`.
-- The later managed C++ runtime will keep switching under switcher ownership while client code plugs into that runtime.
+- Managed C++ deployment is also switcher-owned now: the switcher runtime owns `main()`, stdin, BOOTSEL entry, and core0, while the client runs on core1.
 
 ## Current Status
 
@@ -16,18 +18,20 @@ Implemented now:
 - config discovery and profile validation
 - `to-py --profile ...` for switch-then-sync MicroPython deployment
 - `sync-py --profile ...` for syncing managed MicroPython files without switching
+- `build-cpp --profile ...` for building a managed C++ UF2 from switcher runtime plus client sources
+- `to-cpp --profile ... --build` for build-then-switch managed C++ deployment
 
 Not implemented yet:
 
 - supported importable host API
-- managed C++ runtime and build contract
 
 Examples:
 
 ```bash
 python pico.py to-py --config pico-switcher.toml --profile demo
 python pico.py sync-py --config pico-switcher.toml --profile demo
-python pico.py to-cpp --config pico-switcher.toml --profile demo
+python pico.py build-cpp --config pico-switcher.toml --profile demo
+python pico.py to-cpp --config pico-switcher.toml --profile demo --build
 ```
 
 A supported importable host API is planned, but it is not part of the current contract. Until that API exists, direct imports of internal modules should be treated as unstable implementation details.
@@ -86,6 +90,19 @@ output_uf2 = "build/my_app.uf2"
 - `source_dir` is the client source root
 - `sources` are resolved relative to `source_dir`
 - `output_uf2` is resolved relative to the config file directory
+- the listed source files are compiled together with the switcher-owned runtime
+- one listed source file must define `client_app_main()`
+
+Minimal client example:
+
+```cpp
+#include "switcher_client.h"
+
+extern "C" void client_app_main(void) {
+    while (true) {
+    }
+}
+```
 
 ## Target Managed Runtime Contract
 
@@ -113,10 +130,12 @@ Status:
 
 ### Managed C++ contract
 
-The client provides:
+Public client interface:
 
 ```cpp
-void client_app_main(void);
+#include "switcher_client.h"
+
+extern "C" void client_app_main(void);
 ```
 
 Supported client behavior:
@@ -132,5 +151,13 @@ Unsupported client behavior:
 - reinitialize stdio
 - manage multicore directly
 - call bootloader entry directly
+
+Runtime ownership:
+
+- the switcher runtime owns `main()`
+- the switcher runtime owns USB stdio setup
+- the switcher runtime reads reserved host commands from stdin
+- the switcher runtime enters BOOTSEL when the host sends the reserved `BOOTSEL` command
+- the client runs only through `client_app_main()` on core1
 
 This is a managed contract, not sandboxing. Unsupported client code can still bypass these rules, so physical BOOTSEL remains the recovery path.

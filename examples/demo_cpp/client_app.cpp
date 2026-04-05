@@ -1,11 +1,19 @@
-// Built-in demo C++ client entrypoint for the migration profile.
+// Built-in demo client for the managed C++ runtime.
 //
-// This file gives the Phase 1 demo profile a concrete C++ client source even
-// before the managed runtime exists. Later phases will compile files like this
-// into the switcher-owned runtime and call `client_app_main()` on core1.
+// This example shows the exact client surface downstream apps are expected to
+// provide: include `switcher_client.h`, define `client_app_main()`, and keep
+// all application logic inside that function. The switcher runtime owns
+// startup, BOOTSEL switching, and core0, so the demo intentionally stays inside
+// the supported core1 contract.
 
 #include <stdio.h>
 
+#include "pico/stdlib.h"
+#include "switcher_client.h"
+
 extern "C" void client_app_main(void) {
-    printf("demo client\n");
+    while (true) {
+        printf("demo client tick\n");
+        sleep_ms(1000);
+    }
 }

@@ -59,7 +59,12 @@ class PythonProfile:
 
 @dataclass(frozen=True)
 class CppProfile:
-    """Managed C++ client contract."""
+    """Managed C++ client contract.
+
+    These source files are compiled together with the switcher-owned runtime.
+    Clients are expected to include `cpp/switcher_client.h` and define the one
+    supported entrypoint: `extern "C" void client_app_main(void);`.
+    """
 
     source_dir: Path
     sources: tuple[Path, ...]

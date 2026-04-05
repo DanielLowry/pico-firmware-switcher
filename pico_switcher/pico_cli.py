@@ -20,6 +20,8 @@ from .pico_backup import (
     default_backup_config_path,
     load_backup_config,
 )
+from .pico_cpp import build_managed_cpp_plan, build_managed_cpp_profile
+from .pico_cpp_contract import CPP_BOOTSEL_COMMAND, CPP_CLIENT_ENTRY_SYMBOL
 from .pico_device import (
     DEFAULT_MOUNT_BASE,
     DEFAULT_PORT,
@@ -164,8 +166,6 @@ def build_parser(config: SwitcherConfig) -> argparse.ArgumentParser:
     default_port = config.host.port
     default_mount_base = config.host.mount_base
     default_py_uf2 = config.host.micropython_uf2
-    default_cpp_uf2 = config.host.cpp_uf2
-
     parser = argparse.ArgumentParser(description="Pico firmware switcher CLI (Linux)")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -207,11 +207,28 @@ def build_parser(config: SwitcherConfig) -> argparse.ArgumentParser:
     add_db_arg(sync_py_cmd)
     sync_py_cmd.add_argument("--verbose", action="store_true")
 
+    build_cpp_cmd = subparsers.add_parser(
+        "build-cpp",
+        help="Build the selected managed C++ profile into its configured UF2",
+    )
+    add_config_arg(build_cpp_cmd)
+    add_profile_arg(build_cpp_cmd, config)
+    add_db_arg(build_cpp_cmd)
+    build_cpp_cmd.add_argument("--verbose", action="store_true")
+
     to_cpp_cmd = subparsers.add_parser("to-cpp", help="Switch Pico to C++ UF2")
     add_config_arg(to_cpp_cmd)
     add_common_switch_args(to_cpp_cmd, default_port=default_port, default_mount_base=default_mount_base)
     add_profile_arg(to_cpp_cmd, config)
-    to_cpp_cmd.add_argument("--uf2", default=str(default_cpp_uf2), help="C++ UF2 path")
+    to_cpp_cmd.add_argument(
+        "--uf2",
+        help="C++ UF2 override; defaults to the selected profile output_uf2",
+    )
+    to_cpp_cmd.add_argument(
+        "--build",
+        action="store_true",
+        help="Build the selected managed C++ profile before switching",
+    )
 
     install_cmd = subparsers.add_parser(
         "install-py-files",
@@ -348,8 +365,17 @@ def main() -> int:
             _run_sync_py(args, recorder, reason="cli_sync")
             _print_py_sync_result(args.profile)
             return 0
+        if args.command == "build-cpp":
+            output_uf2 = _run_build_cpp(args, recorder, reason="cli_build")
+            _print_cpp_build_result(args.profile, output_uf2)
+            return 0
         if args.command == "to-cpp":
+            built_uf2: Path | None = None
+            if args.build:
+                built_uf2 = _run_build_cpp(args, recorder, reason="pre_switch")
             flashed = _run_switch(args=args, target="cpp", install_helpers=False, recorder=recorder)
+            if built_uf2 is not None:
+                _print_cpp_build_result(args.profile, built_uf2)
             _print_switch_result(target="cpp", flashed=flashed)
             return 0
         if args.command == "install-py-files":
@@ -456,12 +482,13 @@ def _run_switch(
 
     profile = resolve_profile(args.switcher_config, getattr(args, "profile", None))
     require_profile_target(profile, target)
+    uf2_path = _resolve_switch_uf2_path(args=args, target=target, profile=profile)
 
     return switch_firmware(
         target=target,
         port=args.port,
         mode=args.mode,
-        uf2_path=_expand_path(args.uf2),
+        uf2_path=uf2_path,
         mount_base=args.mount_base,
         detect_timeout=args.detect_timeout,
         bootsel_timeout=args.bootsel_timeout,
@@ -537,6 +564,67 @@ def _run_sync_py(args: argparse.Namespace, recorder: EventRecorder, *, reason: s
             ],
         },
     )
+
+
+def _run_build_cpp(args: argparse.Namespace, recorder: EventRecorder, *, reason: str) -> Path:
+    """Build the selected managed C++ profile and return the resulting UF2."""
+
+    if getattr(args, "uf2", None):
+        raise RuntimeError("`--uf2` cannot be combined with managed C++ build; use profile.cpp.output_uf2 instead")
+
+    profile = _resolve_profile_for_target(args, "cpp")
+    assert profile.cpp is not None  # covered by _resolve_profile_for_target
+    plan = build_managed_cpp_plan(profile.name, profile.cpp)
+
+    recorder.event(
+        "cpp_build_requested",
+        message="Managed C++ build requested",
+        details={
+            "reason": reason,
+            "profile": profile.name,
+            "source_dir": str(plan.source_dir),
+            "sources": [str(source_path) for source_path in plan.sources],
+            "build_dir": str(plan.build_dir),
+            "uf2_path": str(plan.output_uf2),
+            "entry_symbol": CPP_CLIENT_ENTRY_SYMBOL,
+            "bootsel_command": CPP_BOOTSEL_COMMAND,
+        },
+    )
+    try:
+        output_uf2 = build_managed_cpp_profile(plan, verbose=args.verbose)
+    except Exception as exc:
+        recorder.event(
+            "cpp_build",
+            status="error",
+            message=str(exc),
+            details={
+                "reason": reason,
+                "profile": profile.name,
+                "source_dir": str(plan.source_dir),
+                "sources": [str(source_path) for source_path in plan.sources],
+                "build_dir": str(plan.build_dir),
+                "uf2_path": str(plan.output_uf2),
+                "entry_symbol": CPP_CLIENT_ENTRY_SYMBOL,
+                "bootsel_command": CPP_BOOTSEL_COMMAND,
+            },
+        )
+        raise
+
+    recorder.event(
+        "cpp_build",
+        message="Built managed C++ profile",
+        details={
+            "reason": reason,
+            "profile": profile.name,
+            "source_dir": str(plan.source_dir),
+            "sources": [str(source_path) for source_path in plan.sources],
+            "build_dir": str(plan.build_dir),
+            "uf2_path": str(output_uf2),
+            "entry_symbol": CPP_CLIENT_ENTRY_SYMBOL,
+            "bootsel_command": CPP_BOOTSEL_COMMAND,
+        },
+    )
+    return output_uf2
 
 
 def _run_log_state(args: argparse.Namespace, recorder: EventRecorder) -> int:
@@ -784,6 +872,7 @@ _DETAIL_LABELS = {
     "mount_base": "base",
     "entry_function": "entry_fn",
     "entry_module": "entry_mod",
+    "entry_symbol": "entry",
     "reason": "reason",
     "profile": "profile",
     "remote_host": "host",
@@ -793,11 +882,14 @@ _DETAIL_LABELS = {
     "service_name": "service",
     "size_bytes": "size",
     "source_dir": "src",
+    "sources": "files",
     "staged_path": "staged",
     "status": "status",
     "uf2_path": "uf2",
     "unit_dir": "units",
     "runtime_files": "runtime",
+    "build_dir": "build",
+    "bootsel_command": "bootsel",
 }
 
 _DETAIL_PRIORITY = {
@@ -816,14 +908,18 @@ _DETAIL_PRIORITY = {
     "source_dir": 12,
     "entry_module": 13,
     "entry_function": 14,
-    "runtime_files": 15,
-    "reason": 16,
-    "status": 17,
-    "requested_port": 18,
-    "force_flash": 19,
-    "command": 20,
-    "unit_dir": 21,
-    "mount_base": 22,
+    "entry_symbol": 15,
+    "runtime_files": 16,
+    "sources": 17,
+    "build_dir": 18,
+    "bootsel_command": 19,
+    "reason": 20,
+    "status": 21,
+    "requested_port": 22,
+    "force_flash": 23,
+    "command": 24,
+    "unit_dir": 25,
+    "mount_base": 26,
 }
 
 
@@ -974,6 +1070,12 @@ def _print_py_sync_result(profile_name: str) -> None:
     print(f"Synced managed MicroPython profile: {profile_name}")
 
 
+def _print_cpp_build_result(profile_name: str, output_uf2: Path) -> None:
+    """Print the post-build status line shown to CLI users."""
+
+    print(f"Built managed C++ profile: {profile_name} -> {output_uf2}")
+
+
 def _expand_path(path_value: str) -> Path:
     """Expand a user-provided path string to a filesystem path."""
 
@@ -1002,6 +1104,7 @@ def _extract_switcher_config_value(argv: list[str]) -> str | None:
         "flash",
         "to-py",
         "sync-py",
+        "build-cpp",
         "to-cpp",
         "install-py-files",
         "log-state",
@@ -1026,3 +1129,23 @@ def _resolve_profile_for_target(args: argparse.Namespace, target: str) -> Profil
     profile = resolve_profile(args.switcher_config, getattr(args, "profile", None))
     require_profile_target(profile, target)
     return profile
+
+
+def _resolve_switch_uf2_path(args: argparse.Namespace, *, target: str, profile: Profile) -> Path:
+    """Resolve the UF2 path used by a switch command.
+
+    Managed C++ now defaults to the selected profile's declared `output_uf2`,
+    which is the path produced by `build-cpp` or `to-cpp --build`. A manual
+    `--uf2` still overrides that behavior for ad-hoc flashing.
+    """
+
+    if target == "cpp":
+        if args.uf2:
+            return _expand_path(args.uf2)
+        assert profile.cpp is not None  # covered by require_profile_target
+        uf2_path = profile.cpp.output_uf2
+        if not uf2_path.exists():
+            raise RuntimeError(f"C++ UF2 not found: {uf2_path}. Run `build-cpp` or use `to-cpp --build`.")
+        return uf2_path
+
+    return _expand_path(args.uf2)

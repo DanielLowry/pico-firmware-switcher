@@ -7,8 +7,8 @@ Current migration docs
 
 Current state
 - MicroPython side: the host now syncs switcher-owned root files plus the selected client app to a managed `/app` layout on the Pico.
-- C++ side: `bootloader_trigger` firmware prints `FW:CPP` at startup, then waits for a single `'b'` command and calls `reset_usb_boot(...)` to enter UF2 mode.
-- Python CLI is now available as `pico.py` (`detect`, `to-py`, `sync-py`, `to-cpp`, `flash`, `install-py-files`).
+- C++ side: the host now builds one managed UF2 per profile. The switcher runtime owns `main()`, stdin, BOOTSEL entry, and core0, while the client defines `client_app_main()` and runs on core1.
+- Python CLI is now available as `pico.py` (`detect`, `to-py`, `sync-py`, `build-cpp`, `to-cpp`, `flash`, `install-py-files`).
 - Existing shell scripts still work, but they are now legacy helpers.
 
 Plan (target workflow)
@@ -16,11 +16,11 @@ Plan (target workflow)
 - Detect current firmware by reading the boot banner (`FW:PY` / `FW:CPP`) over serial.
 - Trigger UF2 mode remotely:
   - MicroPython: use `mpremote ... bootloader`.
-  - C++: send a single `'b'` over serial to drop into UF2 mode.
+  - C++: send the reserved `BOOTSEL` command over serial to drop into UF2 mode.
 - Wait for the `RPI-RP2` mount and copy the requested UF2.
 - Additional commands:
   - `sync-py` to sync the managed MicroPython files without switching.
-  - later `build-cpp` support for per-profile C++ builds.
+  - `build-cpp` to build one managed C++ UF2 per profile.
 
 Repo layout (relevant bits)
 - `uf2s/` — stored UF2 images (MicroPython and the built C++ bootloader).
@@ -28,7 +28,9 @@ Repo layout (relevant bits)
 - SQLite audit log — defaults to `.pico-switcher/events.sqlite3` in the repo root.
 - `requirements.txt` — Python dependencies (`pyserial`, `mpremote`, `peewee`, and `tomli` on Python < 3.11).
 - `py/bootloader_trigger.py` — legacy MicroPython bootloader helper retained for the older flow.
-- `cpp/` — C++ sources and build outputs (including `build/bootloader_trigger.uf2`).
+- `cpp/managed_runtime.cpp` — switcher-owned managed C++ runtime.
+- `cpp/switcher_client.h` — public C++ client interface.
+- `cpp/` — C++ sources and build outputs (including the managed profile build dir).
 - `shell/` — helper scripts for flashing and triggering.
 
 Prerequisites
@@ -65,14 +67,25 @@ Identify the current firmware
 
 Build the C++ UF2
 - Requirements: Pico SDK set up (`PICO_SDK_PATH` exported), CMake + Make/Ninja.
-- From the repo root:
+- Recommended managed path:
+  ```
+  python pico.py build-cpp --profile demo
+  ```
+  This validates the client contract, configures CMake for the selected profile, builds the managed runtime plus client sources, and copies the resulting UF2 to the profile's configured `output_uf2`.
+- Direct CMake path (demo/default profile):
   ```
   mkdir -p cpp/build
   cd cpp/build
   cmake ..
   make bootloader_trigger
   ```
-  The UF2 will be at `cpp/build/bootloader_trigger.uf2` (copy or link it into `uf2s/` if you want it alongside the others).
+  The UF2 will be at `cpp/build/bootloader_trigger.uf2`.
+
+Managed C++ client interface
+- Include `cpp/switcher_client.h`.
+- Define `extern "C" void client_app_main(void);`
+- Keep application logic inside that function; the switcher runtime owns `main()`, stdin, BOOTSEL entry, and core0.
+- Example client file: `examples/demo_cpp/client_app.cpp`
 
 Common CMake errors and fixes
 - `Compiler 'arm-none-eabi-gcc' not found`. Fix: install `gcc-arm-none-eabi` or set `PICO_TOOLCHAIN_PATH` to the directory that contains `bin/arm-none-eabi-gcc`. Example: `export PICO_TOOLCHAIN_PATH=/opt/gcc-arm-none-eabi-*/bin`
@@ -85,35 +98,39 @@ Usage (single CLI, recommended)
    - If already in MicroPython mode, UF2 flashing is skipped by default (use `--force-flash` to override).
 
 2) Switch to C++
-   - `python pico.py to-cpp --port /dev/ttyACM0 --verbose`
-   - This detects mode, triggers BOOTSEL, mounts `RPI-RP2` if needed, and flashes the C++ UF2.
+   - `python pico.py to-cpp --port /dev/ttyACM0 --profile demo --build --verbose`
+   - This optionally builds the selected managed C++ profile, detects mode, triggers BOOTSEL, mounts `RPI-RP2` if needed, and flashes the selected profile UF2.
    - If already in C++ mode, UF2 flashing is skipped by default (use `--force-flash` to override).
 
-3) Flash any UF2 while already in BOOTSEL
+3) Build the managed C++ UF2 without switching
+   - `python pico.py build-cpp --profile demo`
+   - This produces the profile UF2 at the configured `output_uf2` path.
+
+4) Flash any UF2 while already in BOOTSEL
    - `python pico.py flash /path/to/file.uf2 --verbose`
 
-4) Sync managed MicroPython files without switching
+5) Sync managed MicroPython files without switching
    - `python pico.py sync-py --port /dev/ttyACM0 --profile demo`
    - This waits for a MicroPython serial port, replaces `/app`, copies switcher-owned `boot.py` and `main.py`, and writes generated profile metadata.
 
-5) Legacy alias for managed MicroPython sync
+6) Legacy alias for managed MicroPython sync
    - `python pico.py install-py-files --port /dev/ttyACM0 --profile demo`
    - This now behaves as a compatibility alias for `sync-py`.
 
-6) Record a state snapshot manually
+7) Record a state snapshot manually
    - `python pico.py log-state --port /dev/ttyACM0 --source manual`
    - This appends the current detected state (`py`, `cpp`, `bootsel`, or `unknown`) to the SQLite log.
 
-7) View recent history
+8) View recent history
    - `python pico.py history --kind all`
    - Prints all switch/flash/helper events plus recorded state snapshots from the SQLite log by default. Use `--limit` only if you want a smaller slice.
    - Add `--full-details` if you want the raw JSON detail payloads instead of the compact summary output.
 
-8) Install a 1-minute state snapshot timer
+9) Install a 1-minute state snapshot timer
    - `python pico.py install-state-timer --port /dev/ttyACM0 --enable`
    - This writes `systemd --user` units that call `pico.py log-state` every minute and enables the timer.
 
-9) Create and send a one-off database backup
+10) Create and send a one-off database backup
    - First create `.pico-switcher/backup.toml` in the repo root:
      ```
      [local]
@@ -131,7 +148,7 @@ Usage (single CLI, recommended)
    - Then run: `python pico.py backup-db`
    - This creates a consistent snapshot of the SQLite log database, transfers it to the configured remote host with `rsync` over SSH, and deletes the local staged copy after a successful transfer.
 
-10) If autodetect misses your mode
+11) If autodetect misses your mode
    - Override explicitly: `--mode py`, `--mode cpp`, or `--mode bootsel`.
 
 Logging and state history
@@ -168,16 +185,16 @@ Usage (manual workflow, legacy scripts)
 
 4) Flash the C++ bootloader trigger UF2
    - With the board now in UF2 mode, run: `./shell/load_cpp_bootloader_uf2.sh`
-   - This copies `uf2s/bootloader_trigger.uf2` (built from `cpp/bootloader_trigger.cpp`) to the Pico.
+   - This copies `uf2s/bootloader_trigger.uf2` (now produced from the managed runtime plus the selected client sources) to the Pico.
 
 5) Use the C++ bootloader trigger
    - Connect to the Pico over serial (e.g., `screen /dev/ttyACM0 115200`).
-   - Press `b` to reboot into UF2 mode. From there, you can copy another UF2 to `RPI-RP2` (e.g., via `./shell/load_uf2.sh <filename.uf2>`).
+   - Send `BOOTSEL` followed by Enter to reboot into UF2 mode. From there, you can copy another UF2 to `RPI-RP2` (e.g., via `./shell/load_uf2.sh <filename.uf2>`).
 
 Next steps (priority order)
-- Change the C++ trigger to a single `'b'` command (still print `FW:CPP` on boot).
-- Add `--sync` (MicroPython project copy) and `--build` (C++ rebuild) flags.
-- Add a minimal config file (serial port, mount point, UF2 paths) to avoid hardcoding.
+- Expand detect so it can report managed profile identity as well as `py` / `cpp`.
+- Add a small supported importable host API on top of the new profile/build/switch services.
+- Keep downstream app testing lightweight: unit tests in CI, hardware smoke tests manually.
 
 Notes
 - MicroPython itself ships as a UF2 (already in `uf2s/`); the host syncs switcher-owned runtime files and the selected client app directly onto the MicroPython filesystem rather than building them into a UF2.

@@ -2,7 +2,8 @@
 
 This module handles host-side interaction with the physical Pico device:
 discovering serial ports, locating the BOOTSEL mass-storage device, reading
-serial banners, and sending the low-level bytes needed by the current runtime.
+serial banners, and sending the low-level serial commands needed by the current
+runtime.
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ try:
     from serial.tools import list_ports  # type: ignore
 except ImportError as exc:  # pragma: no cover - runtime dependency check
     raise SystemExit("pyserial is required: pip install pyserial") from exc
+
+from .pico_cpp_contract import CPP_BOOTSEL_COMMAND, CPP_RUNTIME_BANNER
 
 
 DEFAULT_PORT = "auto"
@@ -278,7 +281,7 @@ def read_banner(
             last_line = line
             if "FW:PY" in line:
                 return "py", line
-            if "FW:CPP" in line:
+            if CPP_RUNTIME_BANNER in line:
                 return "cpp", line
     return None, last_line
 
@@ -289,11 +292,16 @@ def trigger_from_cpp(port: str, verbose: bool) -> None:
     Args:
         port: Serial device path.
         verbose: Whether to print trigger activity.
+
+    The managed runtime expects a reserved text command (`BOOTSEL\n`). To keep
+    switching compatible with already-flashed legacy prototype firmware, the
+    host also appends the older single-byte `b` trigger as a fallback.
     """
 
     if verbose:
         print("Triggering BOOTSEL from C++ firmware...")
     resolved_port = resolve_serial_port(port=port, verbose=verbose)
     with serial.Serial(resolved_port, baudrate=115200, timeout=0.2) as ser:
+        ser.write(f"{CPP_BOOTSEL_COMMAND}\n".encode("utf-8"))
         ser.write(b"b")
         ser.flush()
