@@ -26,7 +26,7 @@ from pico_switcher.pico_backup import (
     load_backup_config,
 )
 from pico_switcher import RUNTIME_ROOT
-from pico_switcher.pico_cli import _print_history_section
+from pico_switcher.cli.history import print_history_section
 from pico_switcher.pico_log import EventRecorder, PicoLogStore, default_db_path
 from pico_switcher.pico_systemd import install_state_timer, render_state_timer
 
@@ -292,7 +292,7 @@ class PicoCliHistoryTests(unittest.TestCase):
 
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            _print_history_section("Events", [row], event_rows=True)
+            print_history_section("Events", [row], event_rows=True)
 
         output = buffer.getvalue()
         self.assertIn("2026-03-29T18:06:09Z", output)
@@ -323,7 +323,7 @@ class PicoCliHistoryTests(unittest.TestCase):
 
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            _print_history_section("Events", [row], event_rows=True, full_details=True)
+            print_history_section("Events", [row], event_rows=True, full_details=True)
 
         output = buffer.getvalue()
         self.assertIn("message=SQLite backup requested", output)
