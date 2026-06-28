@@ -42,6 +42,7 @@ Prerequisites
 - A build tool installed (`make` or `ninja`).
 - Pico shows up as `RPI-RP2` when in BOOTSEL mode.
 - A serial port path for the Pico (commonly `/dev/ttyACM0` on Linux).
+- Your Linux user can read/write the serial device. On Debian/Ubuntu/Mint, run `sudo usermod -aG dialout $USER`, then log out and back in.
 
 Pico SDK setup (required for the C++ build)
 1) Get the SDK (with submodules). Command: `git clone --recursive https://github.com/raspberrypi/pico-sdk`
@@ -107,7 +108,9 @@ Usage (single CLI, recommended)
    - This produces the profile UF2 at the configured `output_uf2` path.
 
 4) Flash any UF2 while already in BOOTSEL
-   - `python pico.py flash /path/to/file.uf2 --verbose`
+   - `python pico.py flash /path/to/file.uf2 --force --verbose`
+   - This is a raw UF2 copy path. It now prints a warning and requires you to type `flash` to continue.
+   - Use this only for recovery/manual flashing; it can leave the Pico unmanaged if the UF2 does not support the switcher workflow.
 
 5) Sync managed MicroPython files without switching
    - `python pico.py sync-py --port /dev/ttyACM0 --profile demo`

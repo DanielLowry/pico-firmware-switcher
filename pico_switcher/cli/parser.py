@@ -121,11 +121,19 @@ def build_parser(config: SwitcherConfig) -> argparse.ArgumentParser:
     add_db_arg(detect_cmd)
     detect_cmd.add_argument("--verbose", action="store_true")
 
-    flash_cmd = subparsers.add_parser("flash", help="Flash a UF2 while Pico is in BOOTSEL mode")
+    flash_cmd = subparsers.add_parser(
+        "flash",
+        help="Dangerous: raw UF2 flash while Pico is already in BOOTSEL mode",
+    )
     add_config_arg(flash_cmd)
     flash_cmd.add_argument("uf2", help="Path to UF2 file")
     flash_cmd.add_argument("--mount-base", default=default_mount_base)
     flash_cmd.add_argument("--bootsel-timeout", type=float, default=DEFAULT_BOOTSEL_TIMEOUT)
+    flash_cmd.add_argument(
+        "--force",
+        action="store_true",
+        help="Acknowledge that raw flashing can leave the Pico unmanaged",
+    )
     add_db_arg(flash_cmd)
     flash_cmd.add_argument("--verbose", action="store_true")
 

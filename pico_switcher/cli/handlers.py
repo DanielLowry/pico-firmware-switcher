@@ -8,6 +8,7 @@ existing service modules.
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from ..pico_backup import BackupTransferError, backup_database, load_backup_config
@@ -48,6 +49,7 @@ def run_flash(args: argparse.Namespace, recorder: EventRecorder) -> int:
     """Handle manual UF2 flashing while BOOTSEL mode is already active."""
 
     uf2_path = expand_path(args.uf2)
+    _require_raw_flash_acknowledgement(uf2_path=uf2_path, forced=args.force)
     mountpoint: Path | None = None
     recorder.event(
         "flash_requested",
@@ -80,6 +82,32 @@ def run_flash(args: argparse.Namespace, recorder: EventRecorder) -> int:
         details={"uf2_path": str(uf2_path)},
     )
     return 0
+
+
+def _require_raw_flash_acknowledgement(uf2_path: Path, forced: bool) -> None:
+    """Require an explicit acknowledgement before raw UF2 flashing."""
+
+    if not forced:
+        raise RuntimeError(
+            "Raw `flash` is disabled by default because it can leave the Pico unmanaged. "
+            "Re-run with `--force` to acknowledge the risk."
+        )
+
+    if not uf2_path.exists():
+        raise RuntimeError(f"UF2 file not found: {uf2_path}")
+
+    if not sys.stdin.isatty():
+        raise RuntimeError(
+            "Raw `flash` requires an interactive acknowledgement. "
+            "Re-run the command in a terminal and type `flash` when prompted."
+        )
+
+    print("WARNING: `flash` performs a raw UF2 copy.")
+    print("It can leave the Pico in an unmanaged state where `to-py` / `to-cpp` no longer work.")
+    print(f"UF2: {uf2_path}")
+    response = input("Type `flash` to continue: ").strip()
+    if response != "flash":
+        raise RuntimeError("Raw flash cancelled.")
 
 
 def run_switch(

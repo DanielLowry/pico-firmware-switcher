@@ -8,9 +8,13 @@ runtime.
 
 from __future__ import annotations
 
+import errno
+import grp
 import os
+import pwd
 import shlex
 import shutil
+import stat
 import subprocess
 import time
 from dataclasses import dataclass
@@ -68,7 +72,7 @@ def resolve_serial_port(port: str, verbose: bool) -> str:
         if len(candidates) == 1:
             if verbose:
                 print(f"Using discovered serial port: {candidates[0]}")
-            return candidates[0]
+            return _ensure_serial_port_access(candidates[0])
         if not candidates:
             raise RuntimeError(_missing_serial_port_message(port=port, candidates=candidates))
         raise RuntimeError(
@@ -78,14 +82,53 @@ def resolve_serial_port(port: str, verbose: bool) -> str:
         )
 
     if Path(port).exists():
-        return port
+        return _ensure_serial_port_access(port)
 
     if port == "/dev/ttyACM0" and len(candidates) == 1:
         if verbose:
             print(f"{port} not present; using discovered serial port {candidates[0]}")
-        return candidates[0]
+        return _ensure_serial_port_access(candidates[0])
 
     raise RuntimeError(_missing_serial_port_message(port=port, candidates=candidates))
+
+
+def _ensure_serial_port_access(port: str) -> str:
+    """Return `port` when readable/writable, else raise a practical Linux fix."""
+
+    if os.access(port, os.R_OK | os.W_OK):
+        return port
+    raise RuntimeError(_serial_permission_message(port))
+
+
+def _serial_permission_message(port: str) -> str:
+    """Format a permission hint for USB serial devices."""
+
+    details = ""
+    try:
+        port_stat = os.stat(port)
+        owner = pwd.getpwuid(port_stat.st_uid).pw_name
+        group = grp.getgrgid(port_stat.st_gid).gr_name
+        mode = stat.filemode(port_stat.st_mode)
+        details = f" Current permissions: {mode} {owner}:{group}."
+    except OSError:
+        pass
+
+    return (
+        f"Permission denied opening serial port {port}.{details} "
+        "On Debian/Ubuntu/Mint this is usually fixed with: "
+        "`sudo usermod -aG dialout $USER`, then log out and back in. "
+        "Avoid `sudo uv ...`; root often cannot find user-installed `uv`."
+    )
+
+
+def _is_serial_permission_error(exc: BaseException) -> bool:
+    """Return whether a serial open failure was caused by EACCES."""
+
+    if isinstance(exc, PermissionError):
+        return True
+    if getattr(exc, "errno", None) == errno.EACCES:
+        return True
+    return "Permission denied" in str(exc) or "[Errno 13]" in str(exc)
 
 
 def _missing_serial_port_message(port: str, candidates: tuple[str, ...]) -> str:
@@ -96,7 +139,7 @@ def _missing_serial_port_message(port: str, candidates: tuple[str, ...]) -> str:
         return f"{port_label}. Available USB serial ports: {', '.join(candidates)}"
     return (
         f"{port_label}. No USB serial ports were detected under /dev/ttyACM* or /dev/ttyUSB*. "
-        "If the Pico is already in BOOTSEL mode, use `pico.py flash ...` or `--mode bootsel`."
+        "If the Pico is already in BOOTSEL mode, use `pico.py flash <uf2> --force` or `--mode bootsel`."
     )
 
 
@@ -270,19 +313,24 @@ def read_banner(
 
     last_line = ""
     resolved_port = resolve_serial_port(port=port, verbose=verbose)
-    with serial.Serial(resolved_port, baudrate=baud, timeout=0.1) as ser:
-        ser.reset_input_buffer()
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            raw = ser.readline()
-            if not raw:
-                continue
-            line = raw.decode(errors="ignore").strip()
-            last_line = line
-            if "FW:PY" in line:
-                return "py", line
-            if CPP_RUNTIME_BANNER in line:
-                return "cpp", line
+    try:
+        with serial.Serial(resolved_port, baudrate=baud, timeout=0.1) as ser:
+            ser.reset_input_buffer()
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                raw = ser.readline()
+                if not raw:
+                    continue
+                line = raw.decode(errors="ignore").strip()
+                last_line = line
+                if "FW:PY" in line:
+                    return "py", line
+                if CPP_RUNTIME_BANNER in line:
+                    return "cpp", line
+    except (OSError, serial.SerialException) as exc:
+        if _is_serial_permission_error(exc):
+            raise RuntimeError(_serial_permission_message(resolved_port)) from exc
+        raise
     return None, last_line
 
 
@@ -301,7 +349,12 @@ def trigger_from_cpp(port: str, verbose: bool) -> None:
     if verbose:
         print("Triggering BOOTSEL from C++ firmware...")
     resolved_port = resolve_serial_port(port=port, verbose=verbose)
-    with serial.Serial(resolved_port, baudrate=115200, timeout=0.2) as ser:
-        ser.write(f"{CPP_BOOTSEL_COMMAND}\n".encode("utf-8"))
-        ser.write(b"b")
-        ser.flush()
+    try:
+        with serial.Serial(resolved_port, baudrate=115200, timeout=0.2) as ser:
+            ser.write(f"{CPP_BOOTSEL_COMMAND}\n".encode("utf-8"))
+            ser.write(b"b")
+            ser.flush()
+    except (OSError, serial.SerialException) as exc:
+        if _is_serial_permission_error(exc):
+            raise RuntimeError(_serial_permission_message(resolved_port)) from exc
+        raise
